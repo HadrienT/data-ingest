@@ -1,0 +1,48 @@
+# Local ingestion stack.
+#
+#   docker compose up -d postgres              the store, always on
+#   docker compose run --rm ingest list        what sources exist
+#   docker compose run --rm ingest run --all   one pass over every source
+#
+# Postgres binds to 127.0.0.1 only: nothing here is reachable off the server.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: data-ingest-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PGDATABASE:-dataingest}
+      POSTGRES_USER: ${PGUSER:-dataingest}
+      POSTGRES_PASSWORD: ${PGPASSWORD:?PGPASSWORD must be set in .env}
+    ports:
+      - "127.0.0.1:${PGPORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-dataingest} -d ${PGDATABASE:-dataingest}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ingest:
+    build: .
+    image: data-ingest:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${PGDATABASE:-dataingest}
+      PGUSER: ${PGUSER:-dataingest}
+      PGPASSWORD: ${PGPASSWORD}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FRED_API_KEY: ${FRED_API_KEY:-}
+      FRED_SERIES: ${FRED_SERIES:-}
+    # Runs to completion: scheduling is systemd's job, not the container's.
+    restart: "no"
+    command: ["run", "--all"]
+
+volumes:
+  pgdata:

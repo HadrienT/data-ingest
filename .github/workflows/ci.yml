@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: dataingest
+          POSTGRES_USER: dataingest
+          POSTGRES_PASSWORD: dataingest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dataingest"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: dataingest
+      PGUSER: dataingest
+      PGPASSWORD: dataingest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -e ".[dev]"
+
+      # Network-marked tests call live upstream APIs, which are rate limited
+      # and change their response shape without notice. They are for local runs.
+      - name: Tests
+        run: pytest -m "not network" --disable-warnings
+
+      - name: Lint
+        run: flake8 src scripts tests
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # This repository is public. A previous project in this account published
+      # a service account private key by committing a Terraform plan file;
+      # catching that in CI is cheaper than rotating credentials afterwards.
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

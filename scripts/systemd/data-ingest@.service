@@ -1,0 +1,13 @@
+[Unit]
+Description=data-ingest run for the %i source
+Documentation=https://github.com/HadrienT/data-ingest
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/data-ingest
+ExecStart=/usr/bin/docker compose run --rm ingest run %i
+# Fetching a full index from a slow upstream can take a while; fail rather
+# than hang forever.
+TimeoutStartSec=1800

@@ -1,0 +1,43 @@
+[project]
+name = "data-ingest"
+version = "0.1.0"
+description = "Extensible data ingestion into a local Postgres"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    "pandas",
+    "psycopg[binary]",
+    "pyarrow",
+    # sp500-prices
+    "yfinance",
+    "pandas-market-calendars",
+    # fred-macro
+    "fredapi",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-mock", "flake8"]
+
+[project.scripts]
+ingest = "data_ingest.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+data_ingest = ["sources/data/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "network: hits a live external API; deselect with -m 'not network'",
+    "postgres: needs a reachable Postgres; skipped automatically when there is none",
+]
+
+[tool.flake8]
+ignore = ["W503", "E402", "E501"]

@@ -1,0 +1,21 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*-key.json
+secrets/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# Data pulled down locally; never in git
+/data/
+/data/**/*.parquet
+*.csv.gz
