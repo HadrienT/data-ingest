@@ -10,8 +10,19 @@ UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$UNIT_DIR"
 install -m 644 "$REPO/scripts/systemd/data-ingest@.service" "$UNIT_DIR/"
 
+# Build first: on a cold checkout the build log would otherwise land in the
+# capture below and be parsed as if it were a source.
+docker compose -f "$REPO/docker-compose.yml" build ingest >&2
+
 # Ask the engine itself what exists and when each source wants to run.
-schedules=$(docker compose -f "$REPO/docker-compose.yml" run --rm --no-deps ingest list --porcelain)
+# awk guards the capture: only well-formed "name<TAB>schedule" lines survive.
+schedules=$(docker compose -f "$REPO/docker-compose.yml" run --rm --no-deps ingest list --porcelain \
+  | awk -F'\t' 'NF == 2 && $1 ~ /^[A-Za-z0-9._-]+$/ { print }')
+
+if [ -z "$schedules" ]; then
+  echo "No sources reported by 'ingest list --porcelain'; nothing to install." >&2
+  exit 1
+fi
 
 while IFS=$'\t' read -r name schedule; do
   [ -n "$name" ] || continue
