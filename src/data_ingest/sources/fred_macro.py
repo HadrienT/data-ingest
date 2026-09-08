@@ -30,11 +30,21 @@ logger = logging.getLogger("data_ingest.fred_macro")
 
 #: Reasonable starting set; override with FRED_SERIES as a comma-separated list.
 DEFAULT_SERIES = [
-    "GS10",       # 10-year Treasury constant maturity rate
-    "DFF",        # Effective federal funds rate
+    # ── Macro indicators ──────────────────────────────────────────────
+    "GS10",       # 10-year Treasury constant maturity rate (monthly)
     "CPIAUCSL",   # CPI, all urban consumers
     "UNRATE",     # Unemployment rate
     "T10Y2Y",     # 10-year minus 2-year Treasury spread
+    # ── Treasury CMT par-yield curve (daily), 1M → 30Y ────────────────
+    "DGS1MO", "DGS3MO", "DGS6MO",
+    "DGS1", "DGS2", "DGS3", "DGS5", "DGS7", "DGS10", "DGS20", "DGS30",
+    # ── Overnight / short-rate references ─────────────────────────────
+    "DFF",              # Effective federal funds rate
+    "EFFR",             # Effective federal funds rate (NY Fed vintage)
+    "SOFR",             # Secured Overnight Financing Rate
+    "SOFR30DAYAVG",     # 30-day average SOFR
+    "SOFR90DAYAVG",     # 90-day average SOFR
+    "SOFR180DAYAVG",    # 180-day average SOFR
 ]
 
 
