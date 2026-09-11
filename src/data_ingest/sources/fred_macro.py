@@ -15,18 +15,14 @@ vintage for callers that do not care.
 
 from __future__ import annotations
 
-import logging
 import os
 from typing import List
 
 import pandas as pd
-from fredapi import Fred
 
-from ..config import require
+from ._fred_common import fetch_fred_series
 from ..core.source import Source, Window
 from ..core.spec import Column, TableSpec, WriteMode
-
-logger = logging.getLogger("data_ingest.fred_macro")
 
 #: Reasonable starting set; override with FRED_SERIES as a comma-separated list.
 DEFAULT_SERIES = [
@@ -36,8 +32,14 @@ DEFAULT_SERIES = [
     "UNRATE",     # Unemployment rate
     "T10Y2Y",     # 10-year minus 2-year Treasury spread
     # ── Treasury CMT par-yield curve (daily), 1M → 30Y ────────────────
+    # -- exactly the par-rate quotes bootstrap_curve() (quant-modeling) needs.
     "DGS1MO", "DGS3MO", "DGS6MO",
     "DGS1", "DGS2", "DGS3", "DGS5", "DGS7", "DGS10", "DGS20", "DGS30",
+    # ── T-Bill secondary-market discount rates (daily) ────────────────
+    # -- the genuine short-end deposit quote for a curve bootstrap's front
+    # pillar; convert with t_bill_bond_equivalent_yield() before use, the
+    # simple <=182-day formula does not apply to DTB1YR.
+    "DTB4WK", "DTB3", "DTB6", "DTB1YR",
     # ── Overnight / short-rate references ─────────────────────────────
     "DFF",              # Effective federal funds rate
     "EFFR",             # Effective federal funds rate (NY Fed vintage)
@@ -45,6 +47,10 @@ DEFAULT_SERIES = [
     "SOFR30DAYAVG",     # 30-day average SOFR
     "SOFR90DAYAVG",     # 90-day average SOFR
     "SOFR180DAYAVG",    # 180-day average SOFR
+    # ── Volatility and credit, for vol-surface and xVA work ───────────
+    "VIXCLS",           # CBOE Volatility Index
+    "BAMLC0A0CM",       # ICE BofA US Corporate Index OAS (investment grade)
+    "BAMLH0A0HYM2",     # ICE BofA US High Yield Index OAS
 ]
 
 
@@ -76,29 +82,4 @@ class FredMacro(Source):
         return DEFAULT_SERIES
 
     def fetch(self, window: Window) -> pd.DataFrame:
-        client = Fred(api_key=require("FRED_API_KEY"))
-        start = None if window.full else window.start
-
-        frames = []
-        for series_id in self.series():
-            try:
-                observations = client.get_series(series_id, observation_start=start)
-            except Exception as exc:
-                # One unavailable series must not sink the whole run.
-                logger.warning("Skipping %s: %s", series_id, exc)
-                continue
-            if observations is None or observations.empty:
-                logger.info("%s returned no observations", series_id)
-                continue
-            # Series.reset_index has no `names` argument; name the axis first.
-            frame = observations.rename("value").rename_axis("date").reset_index()
-            frame["series_id"] = series_id
-            frames.append(frame)
-
-        if not frames:
-            return pd.DataFrame()
-
-        data = pd.concat(frames, ignore_index=True)
-        data["date"] = pd.to_datetime(data["date"]).dt.date
-        data["value"] = pd.to_numeric(data["value"], errors="coerce")
-        return data[["series_id", "date", "value"]]
+        return fetch_fred_series(self.series(), window)

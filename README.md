@@ -16,7 +16,18 @@ among others, and everything runs on a self-hosted server.
 | Source | Table | Write mode | Schedule |
 |---|---|---|---|
 | `sp500-prices` | `prices.sp500_daily` | upsert | Mon–Fri 22:00 |
+| `commodity-prices` | `prices.commodity_daily` | upsert | Mon–Fri 23:30 |
 | `fred-macro` | `macro.fred_series` | versioned | Mon–Fri 23:00 |
+| `fx-rates` | `fx.daily_rates` | upsert | Mon–Fri 23:00 |
+
+`fred-macro`'s default series cover the Treasury CMT par-yield curve
+(1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX and credit OAS —
+between the par yields and the T-Bills it carries everything
+`bootstrap_curve()` (quant-modeling) needs to build a discount curve.
+`commodity-prices` and `fx-rates` share their download/fetch mechanics with
+`sp500-prices` and `fred-macro` respectively (`_yfinance_common.py`,
+`_fred_common.py` — leading underscore so the registry does not mistake them
+for sources of their own).
 
 ```bash
 ingest list                  # what exists
