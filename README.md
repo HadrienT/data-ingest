@@ -19,6 +19,7 @@ among others, and everything runs on a self-hosted server.
 | `commodity-prices` | `prices.commodity_daily` | upsert | Mon–Fri 23:30 |
 | `fred-macro` | `macro.fred_series` | versioned | Mon–Fri 23:00 |
 | `fx-rates` | `fx.daily_rates` | upsert | Mon–Fri 23:00 |
+| `options-chain-snapshot` | `options.chain_snapshot` | upsert | Mon–Fri 22:30 |
 
 `fred-macro`'s default series cover the Treasury CMT par-yield curve
 (1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX and credit OAS —
@@ -28,6 +29,16 @@ between the par yields and the T-Bills it carries everything
 `sp500-prices` and `fred-macro` respectively (`_yfinance_common.py`,
 `_fred_common.py` — leading underscore so the registry does not mistake them
 for sources of their own).
+
+`options-chain-snapshot` is different from the other yfinance sources in one
+important way: yfinance only ever exposes the *current* option chain, never a
+past one, so `--full` and `--since` cannot backfill anything — every run just
+fetches today's chain. Running it daily is what builds a history at all; a
+calibration that wants a past day's surface reads that day's stored rows back
+rather than asking yfinance, which no longer has them. Its ticker universe is
+a small fixed list of liquid, options-heavy names (broad ETFs and mega-caps),
+not the full `sp500-prices` universe — see the source file for why — and is
+overridable with `OPTIONS_CHAIN_TICKERS`.
 
 ```bash
 ingest list                  # what exists
