@@ -20,6 +20,7 @@ among others, and everything runs on a self-hosted server.
 | `fred-macro` | `macro.fred_series` | versioned | Mon–Fri 23:00 |
 | `fx-rates` | `fx.daily_rates` | upsert | Mon–Fri 23:00 |
 | `options-chain-snapshot` | `options.chain_snapshot` | upsert | Mon–Fri 22:30 |
+| `dividend-yields` | `prices.dividend_yields` | upsert | Mon–Fri 22:00 |
 
 `fred-macro`'s default series cover the Treasury CMT par-yield curve
 (1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX and credit OAS —
@@ -39,6 +40,11 @@ rather than asking yfinance, which no longer has them. Its ticker universe is
 a small fixed list of liquid, options-heavy names (broad ETFs and mega-caps),
 not the full `sp500-prices` universe — see the source file for why — and is
 overridable with `OPTIONS_CHAIN_TICKERS`.
+
+`dividend-yields` tracks the exact same universe (imported from
+`options_chain.py`, not a second list) because it exists to serve the same
+consumer: Dupire needs a dividend yield to build a forward, and
+`sp500-prices` doesn't carry one.
 
 ```bash
 ingest list                  # what exists
