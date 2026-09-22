@@ -48,7 +48,7 @@ jobs:
         run: pytest -m "not network" --disable-warnings
 
       - name: Lint
-        run: flake8 src scripts tests
+        run: flake8 src scripts tests airflow
 
   secrets:
     name: Secret scan

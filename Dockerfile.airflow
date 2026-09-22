@@ -1,0 +1,16 @@
+# Airflow, with data_ingest installed into it: DAGs in airflow/dags/ import
+# and call the ingestion code directly (see data_ingest_dags.py), so this
+# image needs the package itself, not just its DAG files.
+FROM apache/airflow:3.3.2-python3.11
+
+# Installed against Airflow's own constraints file so data_ingest's deps
+# (pandas, psycopg, ...) resolve to versions Airflow was actually tested
+# against, instead of whatever pip would otherwise pick.
+#
+# --chown: the base image runs as the non-root `airflow` user (uid 50000),
+# but COPY defaults to root:root — without this, setuptools can't create its
+# build/ directory inside the copied source tree ("Permission denied").
+COPY --chown=airflow:root pyproject.toml README.md LICENSE /opt/data-ingest/
+COPY --chown=airflow:root src/ /opt/data-ingest/src/
+RUN pip install --no-cache-dir "/opt/data-ingest" \
+    --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.2/constraints-3.11.txt"

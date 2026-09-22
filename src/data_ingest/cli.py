@@ -17,23 +17,11 @@ from typing import List, Optional
 
 from .config import LOG_LEVEL, dsn
 from .core.database import Database
-from .core.source import Source, Window
+from .core.runner import run_source
+from .core.source import Window
 from .registry import all_sources, get_source
 
 logger = logging.getLogger("data_ingest")
-
-
-def _run_one(db: Database, source: Source, window: Window) -> int:
-    logger.info("[%s] fetching %s", source.name, window)
-    frame = source.fetch(window)
-    if frame.empty:
-        logger.info("[%s] nothing returned", source.name)
-        return 0
-
-    db.ensure_table(source.table, source.write_mode)
-    written = db.write(source.table, frame, source.write_mode)
-    logger.info("[%s] %s rows written to %s", source.name, written, source.table.qualified)
-    return written
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -43,8 +31,9 @@ def cmd_list(args: argparse.Namespace) -> int:
             print("No sources registered.")
         return 0
     if args.porcelain:
-        # Consumed by scripts/install-timer.sh to generate one timer per source,
-        # so the schedule lives with the source rather than in a shell script.
+        # Machine-readable name/schedule pairs, for scripting against the
+        # registry without importing it (schedules are also read directly by
+        # airflow/dags/data_ingest_dags.py, which runs in the same process).
         for source in sources:
             print(f"{source.name}\t{source.schedule}")
         return 0
@@ -67,7 +56,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         else:
             window = source.default_window()
         try:
-            _run_one(db, source, window)
+            run_source(db, source, window)
         except Exception:
             # With --all, one broken upstream must not stop the others.
             logger.exception("[%s] run failed", source.name)

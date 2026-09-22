@@ -60,7 +60,7 @@ class FredMacro(Source):
     write_mode = WriteMode.VERSIONED
     # FRED publishes on business days, in the US morning. Once daily is plenty
     # for series that mostly move monthly.
-    schedule = "Mon..Fri 23:00"
+    schedule = "0 23 * * 1-5"
     lookback_days = 400
 
     table = TableSpec(

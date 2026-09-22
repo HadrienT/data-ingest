@@ -59,8 +59,9 @@ class Source(ABC):
     #: How new rows relate to stored ones. See WriteMode.
     write_mode: WriteMode = WriteMode.UPSERT
 
-    #: systemd OnCalendar expression for the routine run.
-    schedule: str = "Mon..Fri 22:00"
+    #: Cron expression for the routine run, consumed by the Airflow DAG that
+    #: `airflow/dags/data_ingest_dags.py` generates for this source.
+    schedule: str = "0 22 * * 1-5"
 
     #: How far back a routine (non-full) run should look. More than one day, so
     #: a missed run or a late upstream correction is picked up by the next one.

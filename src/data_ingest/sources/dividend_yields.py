@@ -38,7 +38,7 @@ class DividendYields(Source):
     name = "dividend-yields"
     description = "Daily trailing dividend yield for the vol-surface ticker universe (yfinance)"
     write_mode = WriteMode.UPSERT
-    schedule = "Mon..Fri 22:00"
+    schedule = "0 22 * * 1-5"
     lookback_days = 1  # a point-in-time snapshot of "today's known trailing yield", not a series to backfill
 
     table = TableSpec(
