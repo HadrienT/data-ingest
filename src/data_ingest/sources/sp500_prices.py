@@ -44,7 +44,7 @@ class SP500Prices(Source):
     # depending on how the two DST calendars line up, so a 22:00 run lands
     # before the close for a couple of weeks a year; the upsert is idempotent
     # and the lookback means the next run corrects it.
-    schedule = "Mon..Fri 22:00"
+    schedule = "0 22 * * 1-5"
     lookback_days = 5
 
     table = TableSpec(

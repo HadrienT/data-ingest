@@ -72,7 +72,7 @@ class OptionsChainSnapshot(Source):
     write_mode = WriteMode.UPSERT
     # After the US close (16:00 New York), same reasoning as sp500-prices'
     # 22:00 Paris slot: close enough behind the close without chasing DST.
-    schedule = "Mon..Fri 22:30"
+    schedule = "30 22 * * 1-5"
     lookback_days = 1  # there is nothing to look back over; see module docstring
 
     table = TableSpec(

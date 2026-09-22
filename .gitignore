@@ -19,3 +19,9 @@ dist/
 /data/
 /data/**/*.parquet
 *.csv.gz
+
+# Airflow runtime state, bind-mounted by docker-compose; only airflow/dags/
+# is source and belongs in git.
+/airflow/logs/
+/airflow/plugins/
+/airflow/config/

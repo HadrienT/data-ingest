@@ -36,7 +36,7 @@ class FxRates(Source):
     name = "fx-rates"
     description = "Daily FX spot rates, major USD pairs (FRED H.10)"
     write_mode = WriteMode.UPSERT
-    schedule = "Mon..Fri 23:00"
+    schedule = "0 23 * * 1-5"
     lookback_days = 10
 
     table = TableSpec(

@@ -13,14 +13,14 @@ among others, and everything runs on a self-hosted server.
 
 ## Sources
 
-| Source | Table | Write mode | Schedule |
+| Source | Table | Write mode | Schedule (cron, UTC) |
 |---|---|---|---|
-| `sp500-prices` | `prices.sp500_daily` | upsert | Mon–Fri 22:00 |
-| `commodity-prices` | `prices.commodity_daily` | upsert | Mon–Fri 23:30 |
-| `fred-macro` | `macro.fred_series` | versioned | Mon–Fri 23:00 |
-| `fx-rates` | `fx.daily_rates` | upsert | Mon–Fri 23:00 |
-| `options-chain-snapshot` | `options.chain_snapshot` | upsert | Mon–Fri 22:30 |
-| `dividend-yields` | `prices.dividend_yields` | upsert | Mon–Fri 22:00 |
+| `sp500-prices` | `prices.sp500_daily` | upsert | `0 22 * * 1-5` |
+| `commodity-prices` | `prices.commodity_daily` | upsert | `30 23 * * 1-5` |
+| `fred-macro` | `macro.fred_series` | versioned | `0 23 * * 1-5` |
+| `fx-rates` | `fx.daily_rates` | upsert | `0 23 * * 1-5` |
+| `options-chain-snapshot` | `options.chain_snapshot` | upsert | `30 22 * * 1-5` |
+| `dividend-yields` | `prices.dividend_yields` | upsert | `0 22 * * 1-5` |
 
 `fred-macro`'s default series cover the Treasury CMT par-yield curve
 (1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX and credit OAS —
@@ -84,7 +84,7 @@ class MySource(Source):
     name = "my-source"
     description = "What it fetches"
     write_mode = WriteMode.UPSERT
-    schedule = "Mon..Fri 20:00"
+    schedule = "0 20 * * 1-5"
     lookback_days = 5
 
     table = TableSpec(
@@ -105,11 +105,35 @@ class MySource(Source):
 
 Drop it in `src/data_ingest/sources/`. The registry finds it by import, so
 there is no list to update; a list you must remember to update is a list that
-goes stale. Re-run `./scripts/install-timer.sh` and it gets its own timer.
+goes stale. Its DAG appears in the Airflow UI on the next dag-processor scan
+(a few seconds) — nothing else to run. It starts paused; unpause it there.
 
 `schema` is the domain the data belongs to (`prices`, `macro`, `fundamentals`,
 `documents`), so related sources sit together in one database and can still be
 joined across domains.
+
+## Scheduling
+
+Airflow is the scheduler — `airflow/dags/data_ingest_dags.py` generates one
+DAG per registered source at parse time (`ingest_<source>`, e.g.
+`ingest_sp500_prices`), reading each source's `schedule` straight off the
+registry, the same "nothing to hand-register" reasoning the engine already
+applies everywhere else. A DAG's single task calls `run_source`
+(`core/runner.py`) directly, in-process — the same function the CLI's `ingest
+run` uses, not a shelled-out copy of it, so there's exactly one place that
+knows what "running a source" means.
+
+It runs as `LocalExecutor`: a scheduler, api-server, dag-processor and
+triggerer, no Celery/Redis — the workload is a handful of daily batch runs on
+one host, and distributing that across workers would be overhead for
+identical throughput. Airflow's own metadata lives in a Postgres separate
+from the data store (`airflow-postgres`), so its schema migrations can never
+touch ingested data.
+
+Retries (3, 2 minutes apart) and a 30-minute timeout per run mirror what the
+old systemd unit did. A full backfill (`Window.everything()`, what `--full`
+does on the CLI) is a checkbox on "Trigger DAG w/ config" in the UI, not a
+flag you have to know to type over SSH.
 
 ## Running it
 
@@ -118,12 +142,19 @@ outside a container.
 
 ```bash
 cp .env.example .env
-$EDITOR .env                       # PGPASSWORD, and FRED_API_KEY for fred-macro
+$EDITOR .env    # PGPASSWORD, FRED_API_KEY, and the Airflow secrets (see the
+                 # generation commands next to each one in .env.example)
 
 docker compose up -d postgres
 docker compose run --rm ingest run sp500-prices --full   # first backfill
-./scripts/install-timer.sh                               # one timer per source
+
+docker compose up -d airflow-init   # once: migrates Airflow's metadata DB
+docker compose up -d                # scheduler, api-server, dag-processor, triggerer
 ```
+
+The Airflow UI is at `http://127.0.0.1:8080` (login: `AIRFLOW_ADMIN_USER` /
+`AIRFLOW_ADMIN_PASSWORD` from `.env`). DAGs start paused; unpause the ones you
+want to run on their schedule.
 
 Everything binds to `127.0.0.1`; nothing here is reachable off the server.
 

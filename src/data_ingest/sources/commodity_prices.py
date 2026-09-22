@@ -49,7 +49,7 @@ class CommodityPrices(Source):
     # Futures trade nearly round the clock across sessions, unlike a single
     # equity exchange's hours, so there is no close-vs-timezone edge case to
     # align to here -- a plain lookback window is enough.
-    schedule = "Mon..Fri 23:30"
+    schedule = "30 23 * * 1-5"
     lookback_days = 5
 
     table = TableSpec(
