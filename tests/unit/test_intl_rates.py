@@ -148,3 +148,30 @@ def test_every_catalogued_series_is_published():
     # daily (SNB and BoJ publish with a lag of about a week).
     assert not missing, f"not published in the last 45 days: {sorted(missing)}"
     assert isinstance(frame, pd.DataFrame) and intl_rates.CATALOG
+
+
+# ── ecb-fx ───────────────────────────────────────────────────────────────────
+
+EXR_CSV = """KEY,FREQ,CURRENCY,CURRENCY_DENOM,EXR_TYPE,EXR_SUFFIX,TIME_PERIOD,OBS_VALUE
+EXR.D.USD.EUR.SP00.A,D,USD,EUR,SP00,A,2026-09-24,1.1367
+EXR.D.JPY.EUR.SP00.A,D,JPY,EUR,SP00,A,2026-09-24,180.57
+EXR.D.RUB.EUR.SP00.A,D,RUB,EUR,SP00,A,2022-03-01,
+"""
+
+
+def test_ecb_fx_rows_are_units_per_euro_and_gaps_dropped():
+    from data_ingest.sources.ecb_fx import parse_exr_csv
+
+    rows = parse_exr_csv(EXR_CSV)
+    assert rows == [("USD", date(2026, 9, 24), 1.1367), ("JPY", date(2026, 9, 24), 180.57)]
+    # a cross rate by division: USD/JPY = JPY per EUR / USD per EUR
+    assert rows[1][2] / rows[0][2] == pytest.approx(158.855, rel=1e-4)
+
+
+@pytest.mark.network
+def test_ecb_fx_publishes_the_project_currencies():
+    from data_ingest.sources.ecb_fx import EcbFx
+
+    frame = EcbFx().fetch(Window.recent(10))
+    assert {"USD", "GBP", "JPY", "CHF"} <= set(frame["currency"])
+    assert not frame["value"].isna().any()
