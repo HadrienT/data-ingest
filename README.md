@@ -24,6 +24,7 @@ among others, and everything runs on a self-hosted server.
 | `intl-rates` | `macro.intl_rates` | upsert | `30 21 * * 1-5` |
 | `equity-universe` | `prices.equity_universe` | upsert | `0 6 * * 1` |
 | `intl-equity-prices` | `prices.intl_equity_daily` | upsert | `30 18 * * 1-5` |
+| `ecb-fx` | `fx.ecb_reference_rates` | upsert | `0 16 * * 1-5` |
 
 `fred-macro`'s default series cover the Treasury CMT par-yield curve
 (1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX and credit OAS —
@@ -48,6 +49,11 @@ overridable with `OPTIONS_CHAIN_TICKERS`.
 `options_chain.py`, not a second list) because it exists to serve the same
 consumer: Dupire needs a dividend yield to build a forward, and
 `sp500-prices` doesn't carry one.
+
+`ecb-fx` stores the ECB's euro reference rates for every currency it
+publishes, daily since 1999: `value` is the number of units of `currency` per
+euro, and any cross rate follows by division (USD/JPY = JPY per EUR ÷ USD per
+EUR). It complements `fx-rates` (FRED H.10, USD pairs at noon New York).
 
 `intl-equity-prices` extends `sp500-prices` to the CAC 40, DAX, FTSE 100 and
 Nikkei 225 — every constituent and the index itself, daily OHLCV from yfinance
