@@ -11,6 +11,7 @@ def test_discovers_the_shipped_sources():
     assert {
         "sp500-prices", "fred-macro", "fx-rates", "commodity-prices",
         "options-chain-snapshot", "dividend-yields", "intl-rates",
+        "equity-universe", "intl-equity-prices",
     } <= names
 
 
@@ -21,6 +22,7 @@ def test_underscore_prefixed_modules_are_not_sources():
     assert "_fred_common" not in names
     assert "_yfinance_common" not in names
     assert "_intl_providers" not in names
+    assert "_constituents" not in names
 
 
 def test_every_source_is_usable():

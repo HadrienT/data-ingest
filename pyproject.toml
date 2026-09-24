@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-mock", "flake8"]
+dev = ["pytest", "pytest-mock", "flake8", "lxml"]  # lxml: scripts/refresh_index_constituents.py
 
 [project.scripts]
 ingest = "data_ingest.cli:main"
@@ -32,7 +32,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-data_ingest = ["sources/data/*.csv"]
+data_ingest = ["sources/data/*.csv", "sources/data/constituents/*.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
