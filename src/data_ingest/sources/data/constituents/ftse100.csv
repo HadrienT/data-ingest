@@ -1,0 +1,102 @@
+ticker,name,kind,quote_currency,as_of
+^FTSE,FTSE 100,index,GBP,2026-09-24
+AAF.L,Airtel Africa,equity,GBp,2026-09-24
+AAL.L,Anglo American plc,equity,GBp,2026-09-24
+ABDN.L,Aberdeen Group,equity,GBp,2026-09-24
+ABF.L,Associated British Foods,equity,GBp,2026-09-24
+ADM.L,Admiral Group,equity,GBp,2026-09-24
+ALW.L,Alliance Witan,equity,GBp,2026-09-24
+ANTO.L,Antofagasta plc,equity,GBp,2026-09-24
+AUTO.L,Autotrader Group,equity,GBp,2026-09-24
+AV.L,Aviva,equity,GBp,2026-09-24
+AZN.L,AstraZeneca,equity,GBp,2026-09-24
+BA.L,BAE Systems,equity,GBp,2026-09-24
+BAB.L,Babcock International,equity,GBp,2026-09-24
+BARC.L,Barclays,equity,GBp,2026-09-24
+BATS.L,British American Tobacco,equity,GBp,2026-09-24
+BBOX.L,Tritax Big Box REIT,equity,GBp,2026-09-24
+BEZ.L,Beazley,equity,GBp,2026-09-24
+BGEO.L,Lion Finance Group,equity,GBp,2026-09-24
+BLND.L,British Land,equity,GBp,2026-09-24
+BNZL.L,Bunzl,equity,GBp,2026-09-24
+BP.L,BP,equity,GBp,2026-09-24
+BRBY.L,Burberry Group,equity,GBp,2026-09-24
+BT-A.L,BT Group,equity,GBp,2026-09-24
+BTRW.L,Barratt Redrow,equity,GBp,2026-09-24
+CCC.L,Computacenter,equity,GBp,2026-09-24
+CCEP.L,Coca-Cola Europacific Partners,equity,GBp,2026-09-24
+CCH.L,Coca-Cola HBC,equity,GBp,2026-09-24
+CNA.L,Centrica,equity,GBp,2026-09-24
+CPG.L,Compass Group,equity,USD,2026-09-24
+CRDA.L,Croda International,equity,GBp,2026-09-24
+CTEC.L,Convatec,equity,GBp,2026-09-24
+DCC.L,DCC Energy,equity,GBp,2026-09-24
+DGE.L,Diageo,equity,GBp,2026-09-24
+DPLM.L,Diploma,equity,GBp,2026-09-24
+EDV.L,Endeavour Mining,equity,GBp,2026-09-24
+EXPN.L,Experian,equity,GBp,2026-09-24
+EZJ.L,EasyJet,equity,GBp,2026-09-24
+FCIT.L,F & C Investment Trust,equity,GBp,2026-09-24
+FRES.L,Fresnillo plc,equity,GBp,2026-09-24
+GAW.L,Games Workshop,equity,GBp,2026-09-24
+GLEN.L,Glencore,equity,GBp,2026-09-24
+GSK.L,GSK plc,equity,GBp,2026-09-24
+HLMA.L,Halma plc,equity,GBp,2026-09-24
+HLN.L,Haleon,equity,GBp,2026-09-24
+HSBA.L,HSBC,equity,GBp,2026-09-24
+HSX.L,Hiscox,equity,GBp,2026-09-24
+HWDN.L,Howdens Joinery,equity,GBp,2026-09-24
+IAG.L,International Airlines Group,equity,GBp,2026-09-24
+ICG.L,ICG,equity,GBp,2026-09-24
+IGG.L,IG Group,equity,GBp,2026-09-24
+IHG.L,IHG Hotels & Resorts,equity,USD,2026-09-24
+III.L,3i,equity,GBp,2026-09-24
+IMB.L,Imperial Brands,equity,GBp,2026-09-24
+IMI.L,IMI,equity,GBp,2026-09-24
+INF.L,Informa,equity,GBp,2026-09-24
+INVP.L,Investec,equity,GBp,2026-09-24
+ITH.L,Ithaca Energy,equity,GBp,2026-09-24
+ITRK.L,Intertek,equity,GBp,2026-09-24
+JD.L,JD Sports,equity,GBp,2026-09-24
+KGF.L,Kingfisher plc,equity,GBp,2026-09-24
+LAND.L,Land Securities,equity,GBp,2026-09-24
+LGEN.L,Legal & General,equity,GBp,2026-09-24
+LLOY.L,Lloyds Banking Group,equity,GBp,2026-09-24
+LMP.L,LondonMetric Property,equity,GBp,2026-09-24
+LSEG.L,London Stock Exchange Group,equity,GBp,2026-09-24
+MKS.L,Marks & Spencer,equity,GBp,2026-09-24
+MNG.L,M&G,equity,GBp,2026-09-24
+MRO.L,Melrose Industries,equity,GBp,2026-09-24
+MTLN.L,Metlen Energy & Metals,equity,EUR,2026-09-24
+NG.L,National Grid plc,equity,GBp,2026-09-24
+NWG.L,NatWest Group,equity,GBp,2026-09-24
+NXT.L,Next plc,equity,GBp,2026-09-24
+PCT.L,Polar Capital Technology Trust,equity,GBp,2026-09-24
+PRU.L,Prudential plc,equity,GBp,2026-09-24
+PSH.L,Pershing Square Holdings,equity,GBp,2026-09-24
+PSON.L,Pearson plc,equity,GBp,2026-09-24
+REL.L,RELX,equity,GBp,2026-09-24
+RIO.L,Rio Tinto,equity,GBp,2026-09-24
+RKT.L,Reckitt,equity,GBp,2026-09-24
+RR.L,Rolls-Royce Holdings,equity,GBp,2026-09-24
+RTO.L,Rentokil Initial,equity,GBp,2026-09-24
+SBRY.L,Sainsbury's,equity,GBp,2026-09-24
+SDLF.L,Standard Life,equity,GBp,2026-09-24
+SDR.L,Schroders,equity,GBp,2026-09-24
+SGE.L,Sage Group,equity,GBp,2026-09-24
+SGRO.L,Segro,equity,GBp,2026-09-24
+SHEL.L,Shell plc,equity,GBp,2026-09-24
+SMIN.L,Smiths Group,equity,GBp,2026-09-24
+SMT.L,Scottish Mortgage Investment Trust,equity,GBp,2026-09-24
+SN.L,Smith & Nephew,equity,GBp,2026-09-24
+SPX.L,Spirax Group,equity,GBp,2026-09-24
+SSE.L,SSE plc,equity,GBp,2026-09-24
+STAN.L,Standard Chartered,equity,GBp,2026-09-24
+STJ.L,St. James's Place,equity,GBp,2026-09-24
+SVT.L,Severn Trent,equity,GBp,2026-09-24
+TSCO.L,Tesco,equity,GBp,2026-09-24
+ULVR.L,Unilever,equity,GBp,2026-09-24
+UU.L,United Utilities,equity,GBp,2026-09-24
+VOD.L,Vodafone Group,equity,GBp,2026-09-24
+WEIR.L,Weir,equity,GBp,2026-09-24
+WTB.L,Whitbread,equity,GBp,2026-09-24

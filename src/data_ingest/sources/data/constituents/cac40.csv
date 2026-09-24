@@ -1,0 +1,42 @@
+ticker,name,kind,quote_currency,as_of
+^FCHI,CAC 40,index,EUR,2026-09-24
+AC.PA,Accor,equity,EUR,2026-09-24
+ACA.PA,Crédit Agricole,equity,EUR,2026-09-24
+AI.PA,Air Liquide,equity,EUR,2026-09-24
+AIR.PA,Airbus,equity,EUR,2026-09-24
+BN.PA,Danone,equity,EUR,2026-09-24
+BNP.PA,BNP Paribas,equity,EUR,2026-09-24
+BVI.PA,Bureau Veritas,equity,EUR,2026-09-24
+CA.PA,Carrefour,equity,EUR,2026-09-24
+CAP.PA,Capgemini,equity,EUR,2026-09-24
+CS.PA,Axa,equity,EUR,2026-09-24
+DG.PA,Vinci,equity,EUR,2026-09-24
+DSY.PA,Dassault Systèmes,equity,EUR,2026-09-24
+EDEN.PA,Edenred,equity,EUR,2026-09-24
+EL.PA,EssilorLuxottica,equity,EUR,2026-09-24
+EN.PA,Bouygues,equity,EUR,2026-09-24
+ENGI.PA,Engie,equity,EUR,2026-09-24
+ERF.PA,Eurofins Scientific,equity,EUR,2026-09-24
+GLE.PA,Société Générale,equity,EUR,2026-09-24
+HO.PA,Thales,equity,EUR,2026-09-24
+KER.PA,Kering,equity,EUR,2026-09-24
+LR.PA,Legrand,equity,EUR,2026-09-24
+MC.PA,LVMH,equity,EUR,2026-09-24
+ML.PA,Michelin,equity,EUR,2026-09-24
+MT.AS,ArcelorMittal,equity,EUR,2026-09-24
+OR.PA,L'Oréal,equity,EUR,2026-09-24
+ORA.PA,Orange,equity,EUR,2026-09-24
+PUB.PA,Publicis,equity,EUR,2026-09-24
+RI.PA,Pernod Ricard,equity,EUR,2026-09-24
+RMS.PA,Hermès,equity,EUR,2026-09-24
+RNO.PA,Renault,equity,EUR,2026-09-24
+SAF.PA,Safran,equity,EUR,2026-09-24
+SAN.PA,Sanofi,equity,EUR,2026-09-24
+SGO.PA,Saint-Gobain,equity,EUR,2026-09-24
+STLAP.PA,Stellantis,equity,EUR,2026-09-24
+STMPA.PA,STMicroelectronics,equity,EUR,2026-09-24
+SU.PA,Schneider Electric,equity,EUR,2026-09-24
+TEP.PA,Teleperformance,equity,EUR,2026-09-24
+TTE.PA,TotalEnergies,equity,EUR,2026-09-24
+URW.PA,Unibail-Rodamco-Westfield,equity,EUR,2026-09-24
+VIE.PA,Veolia,equity,EUR,2026-09-24

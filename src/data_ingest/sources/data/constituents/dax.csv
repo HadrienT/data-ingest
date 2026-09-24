@@ -1,0 +1,42 @@
+ticker,name,kind,quote_currency,as_of
+^GDAXI,DAX,index,EUR,2026-09-24
+ADS.DE,Adidas,equity,EUR,2026-09-24
+AIR.PA,Airbus,equity,EUR,2026-09-24
+ALV.DE,Allianz,equity,EUR,2026-09-24
+BAS.DE,BASF,equity,EUR,2026-09-24
+BAYN.DE,Bayer,equity,EUR,2026-09-24
+BEI.DE,Beiersdorf,equity,EUR,2026-09-24
+BMW.DE,BMW,equity,EUR,2026-09-24
+BNR.DE,Brenntag,equity,EUR,2026-09-24
+CBK.DE,Commerzbank,equity,EUR,2026-09-24
+CON.DE,Continental,equity,EUR,2026-09-24
+DB1.DE,Deutsche Börse,equity,EUR,2026-09-24
+DBK.DE,Deutsche Bank,equity,EUR,2026-09-24
+DHL.DE,Deutsche Post,equity,EUR,2026-09-24
+DTE.DE,Deutsche Telekom,equity,EUR,2026-09-24
+DTG.DE,Daimler Truck,equity,EUR,2026-09-24
+ENR.DE,Siemens Energy,equity,EUR,2026-09-24
+EOAN.DE,E.ON,equity,EUR,2026-09-24
+FME.DE,Fresenius Medical Care,equity,EUR,2026-09-24
+FRE.DE,Fresenius,equity,EUR,2026-09-24
+G1A.DE,GEA Group,equity,EUR,2026-09-24
+G24.DE,Scout24,equity,EUR,2026-09-24
+HEI.DE,Heidelberg Materials,equity,EUR,2026-09-24
+HEN3.DE,Henkel,equity,EUR,2026-09-24
+HNR1.DE,Hannover Re,equity,EUR,2026-09-24
+IFX.DE,Infineon Technologies,equity,EUR,2026-09-24
+MBG.DE,Mercedes-Benz Group,equity,EUR,2026-09-24
+MRK.DE,Merck,equity,EUR,2026-09-24
+MTX.DE,MTU Aero Engines,equity,EUR,2026-09-24
+MUV2.DE,Munich Re,equity,EUR,2026-09-24
+PAH3.DE,Porsche SE,equity,EUR,2026-09-24
+QIA.DE,Qiagen,equity,EUR,2026-09-24
+RHM.DE,Rheinmetall,equity,EUR,2026-09-24
+RWE.DE,RWE,equity,EUR,2026-09-24
+SAP.DE,SAP,equity,EUR,2026-09-24
+SHL.DE,Siemens Healthineers,equity,EUR,2026-09-24
+SIE.DE,Siemens,equity,EUR,2026-09-24
+SY1.DE,Symrise,equity,EUR,2026-09-24
+VNA.DE,Vonovia,equity,EUR,2026-09-24
+VOW3.DE,Volkswagen Group,equity,EUR,2026-09-24
+ZAL.DE,Zalando,equity,EUR,2026-09-24
