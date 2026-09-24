@@ -23,6 +23,11 @@ x-airflow-common:
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    # Where a task (run by the scheduler's LocalExecutor) reaches Airflow's
+    # execution API. Unset, Airflow 3 defaults to localhost:8080 — the
+    # scheduler's own container, where nothing listens — and every task dies
+    # with "Connection refused" before its first log line.
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'

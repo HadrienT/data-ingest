@@ -164,6 +164,10 @@ $EDITOR .env    # PGPASSWORD, FRED_API_KEY, and the Airflow secrets (see the
 docker compose up -d postgres
 docker compose run --rm ingest run sp500-prices --full   # first backfill
 
+# once, BEFORE the first `up`: Airflow runs as AIRFLOW_UID and writes into
+# these bind mounts; left to Docker they are created root-owned, and the
+# dag-processor crash-loops on "No such file or directory" for its logs.
+mkdir -p airflow/logs airflow/plugins airflow/config
 docker compose up -d airflow-init   # once: migrates Airflow's metadata DB
 docker compose up -d                # scheduler, api-server, dag-processor, triggerer
 ```
