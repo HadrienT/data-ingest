@@ -193,6 +193,23 @@ docker compose up -d airflow-init   # once: migrates Airflow's metadata DB
 docker compose up -d                # scheduler, api-server, dag-processor, triggerer
 ```
 
+**Updating** — after a merge, or a new source — is one command, from `main`:
+
+```bash
+scripts/deploy.sh           # pull, rebuild, restart what changed, verify
+scripts/deploy.sh --check   # the same checks, nothing built or restarted
+```
+
+A restart is not enough: the Airflow image installs `data_ingest` when it is
+built, and the DAG file reads the sources from that installed package, so a
+new source only appears after a rebuild. The script refuses a branch other
+than `main` or uncommitted changes (this checkout is also where the stack
+runs), fixes nothing silently (a root-owned `airflow/logs` is reported with
+the command to fix it), waits for the four Airflow services to be healthy,
+fails on a DAG import error, and lists the DAGs still paused. It never starts
+the `ingest` service, whose default command runs every source — which a bare
+`docker compose up -d` does.
+
 The Airflow UI is at `http://127.0.0.1:8080` (login: `AIRFLOW_ADMIN_USER` /
 `AIRFLOW_ADMIN_PASSWORD` from `.env`). DAGs start paused; unpause the ones you
 want to run on their schedule.
