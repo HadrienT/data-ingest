@@ -14,6 +14,8 @@ dependencies = [
     "pandas-market-calendars",
     # fred-macro
     "fredapi",
+    # intl-rates (ECB, BoE, SNB, BoJ, MoF: plain HTTP, no client library)
+    "requests",
 ]
 
 [project.optional-dependencies]

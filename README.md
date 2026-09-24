@@ -21,6 +21,7 @@ among others, and everything runs on a self-hosted server.
 | `fx-rates` | `fx.daily_rates` | upsert | `0 23 * * 1-5` |
 | `options-chain-snapshot` | `options.chain_snapshot` | upsert | `30 22 * * 1-5` |
 | `dividend-yields` | `prices.dividend_yields` | upsert | `0 22 * * 1-5` |
+| `intl-rates` | `macro.intl_rates` | upsert | `30 21 * * 1-5` |
 
 `fred-macro`'s default series cover the Treasury CMT par-yield curve
 (1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX and credit OAS —
@@ -45,6 +46,21 @@ overridable with `OPTIONS_CHAIN_TICKERS`.
 `options_chain.py`, not a second list) because it exists to serve the same
 consumer: Dupire needs a dividend yield to build a forward, and
 `sp500-prices` doesn't carry one.
+
+`intl-rates` is the non-USD counterpart of `fred-macro`'s rates: EUR, GBP,
+CHF and JPY reference rates and government curves, straight from the central
+banks and treasuries that publish them for free, with no API key — the ECB
+(€STR and its compounded averages, the deposit rate, monthly Euribor averages,
+the euro-area AAA zero-coupon curve 3M → 30Y), the Bank of England (SONIA,
+Bank Rate, nominal gilt par yields 5/10/20Y), the SNB (SARON and its compound
+rates), the Bank of Japan (TONA) and Japan's Ministry of Finance (JGB par
+yields 1Y → 40Y). One long table, `(series_id, date, value)` in percent — the
+shape of `macro.fred_series` — with ids like `EUR.ESTR` or `JPY.JGB_10Y`; the
+catalogue, with each series' kind and tenor, is `CATALOG` in the source file.
+What is *not* free is not there: OIS swap curves in every currency, and daily
+Euribor fixings (an EMMI licence). The SNB stopped publishing Confederation
+bond yields in 2025, so CHF has no government curve. Each provider is fetched
+independently; one being down costs only its own series.
 
 ```bash
 ingest list                  # what exists
