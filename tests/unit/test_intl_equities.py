@@ -72,6 +72,13 @@ def test_universe_covers_five_markets_and_keys_are_unique():
     # Airbus is in two indices: two rows, one per market.
     assert set(frame.loc[frame["ticker"] == "AIR.PA", "market"]) == {"CAC40", "DAX"}
     assert frame["currency"].str.fullmatch(r"[A-Z]{3}").all()  # ISO, never "GBp"
+    # tickers.csv carries index symbols: ^ is an index, and a foreign index
+    # belongs to its own market only, in its own currency.
+    sp = frame[frame["market"] == "SP500"].set_index("ticker")
+    assert sp.loc["^GSPC", "kind"] == "index"
+    assert not {"^FCHI", "^GDAXI", "^FTSE", "^N225"} & set(sp.index)
+    ftse = frame[(frame["market"] == "FTSE100") & (frame["ticker"] == "^FTSE")]
+    assert ftse["currency"].tolist() == ["GBP"]
 
 
 def test_price_table_shape():

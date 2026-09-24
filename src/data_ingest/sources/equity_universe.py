@@ -52,9 +52,18 @@ class EquityUniverse(Source):
         ]
         # The S&P 500 list predates this table and carries no names and no
         # date: the run date stands in as its as_of (the list in force today).
+        # It also holds a few index symbols (^GSPC, ^DJI… and the CAC 40, DAX,
+        # FTSE 100 and Nikkei 225 indices): a ^ symbol is an index, and one
+        # that belongs to another market is listed there only, in its own
+        # currency — not as a USD member of the S&P 500.
+        elsewhere = {m.ticker for m in all_members()}
         sp500 = pd.read_csv(DATA_DIR / "tickers.csv", header=None)[0].dropna().astype(str)
         today = pd.Timestamp.now(tz="UTC").date().isoformat()
-        rows += [("SP500", t, None, "equity", "USD", today) for t in sp500]
+        rows += [
+            ("SP500", t, None, "index" if t.startswith("^") else "equity", "USD", today)
+            for t in sp500
+            if t not in elsewhere
+        ]
         frame = pd.DataFrame(rows, columns=[c.name for c in self.table.columns])
         frame["as_of"] = pd.to_datetime(frame["as_of"]).dt.date
         return frame
