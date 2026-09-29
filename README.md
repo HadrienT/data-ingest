@@ -25,9 +25,14 @@ among others, and everything runs on a self-hosted server.
 | `equity-universe` | `prices.equity_universe` | upsert | `0 6 * * 1` |
 | `intl-equity-prices` | `prices.intl_equity_daily` | upsert | `30 18 * * 1-5` |
 | `ecb-fx` | `fx.ecb_reference_rates` | upsert | `0 16 * * 1-5` |
+| `sec-fundamentals` | `fundamentals.sec_facts` | upsert | `0 5 * * 6` |
+| `sec-filings` | `fundamentals.sec_filings` | upsert | `30 4 * * 6` |
 
 `fred-macro`'s default series cover the Treasury CMT par-yield curve
-(1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX and credit OAS —
+(1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX, Moody's Aaa/Baa
+yields and the ICE BofA credit OAS — aggregate, by rating (AAA → CCC) and, for
+investment grade, by maturity bucket (1-3Y → 15Y+), the only free credit term
+structure (ICE lets FRED serve three years of history) —
 between the par yields and the T-Bills it carries everything
 `bootstrap_curve()` (quant-modeling) needs to build a discount curve.
 `commodity-prices` and `fx-rates` share their download/fetch mechanics with
@@ -82,6 +87,16 @@ What is *not* free is not there: OIS swap curves in every currency, and daily
 Euribor fixings (an EMMI licence). The SNB stopped publishing Confederation
 bond yields in 2025, so CHF has no government curve. Each provider is fetched
 independently; one being down costs only its own series.
+
+`sec-fundamentals` and `sec-filings` read SEC EDGAR for the S&P 500 (no key,
+but `SEC_USER_AGENT` must name you with a contact address, or EDGAR answers
+403). The first stores ~60 chosen XBRL concepts from every 10-K and 10-Q —
+income statement, balance sheet, debt, cash flows — under their raw XBRL
+names, one row per fact *and filing*: a 10-K restates prior years, and keeping
+each filing's figure with its `filed` date keeps the table point-in-time.
+Which tag means "revenue" for a given company is left to the consumer. The
+second lists the filings themselves, with the URL of each document, the
+company name and its SIC industry.
 
 ```bash
 ingest list                  # what exists

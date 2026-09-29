@@ -75,7 +75,10 @@ def cmd_status(_args: argparse.Namespace) -> int:
             print(f"{source.name:<16} {source.table.qualified:<22} not created yet")
             continue
         count = db.row_count(source.table)
-        first, last = db.bounds(source.table, "date")
+        # The first DATE column dates the rows ("date" for most sources; the
+        # SEC tables have none by that name).
+        dated = next((c.name for c in source.table.columns if c.type == "DATE"), None)
+        first, last = db.bounds(source.table, dated) if dated else (None, None)
         print(f"{source.name:<16} {source.table.qualified:<22} {count:>10} rows  {first} -> {last}")
     return 0
 

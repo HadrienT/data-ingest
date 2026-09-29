@@ -51,6 +51,29 @@ DEFAULT_SERIES = [
     "VIXCLS",           # CBOE Volatility Index
     "BAMLC0A0CM",       # ICE BofA US Corporate Index OAS (investment grade)
     "BAMLH0A0HYM2",     # ICE BofA US High Yield Index OAS
+    # ── Credit spreads by rating (ICE BofA OAS, daily) ────────────────
+    # -- one number per rating bucket, no term structure; quant-modeling's
+    # credit page turns each into a flat hazard rate. ICE lets FRED serve
+    # only the last three years of these.
+    "BAMLC0A1CAAA",     # AAA
+    "BAMLC0A2CAA",      # AA
+    "BAMLC0A3CA",       # A
+    "BAMLC0A4CBBB",     # BBB
+    "BAMLH0A1HYBB",     # BB
+    "BAMLH0A2HYB",      # B
+    "BAMLH0A3HYC",      # CCC and lower
+    # ── Credit spreads by maturity (ICE BofA US Corporate OAS, daily) ─
+    # -- the only free credit term structure: investment grade as a whole,
+    # by maturity bucket. Bootstrapped into a hazard-rate curve.
+    "BAMLC1A0C13Y",     # 1-3Y
+    "BAMLC2A0C35Y",     # 3-5Y
+    "BAMLC3A0C57Y",     # 5-7Y
+    "BAMLC4A0C710Y",    # 7-10Y
+    "BAMLC7A0C1015Y",   # 10-15Y
+    "BAMLC8A0C15PY",    # 15Y+
+    # ── Moody's seasoned corporate yields (daily, decades of history) ─
+    "DAAA",             # Aaa
+    "DBAA",             # Baa
 ]
 
 
