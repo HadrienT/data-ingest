@@ -48,6 +48,8 @@ x-airflow-common:
     FRED_SERIES: ${FRED_SERIES:-}
     FX_SERIES: ${FX_SERIES:-}
     OPTIONS_CHAIN_TICKERS: ${OPTIONS_CHAIN_TICKERS:-}
+    SEC_USER_AGENT: ${SEC_USER_AGENT:-}
+    SEC_TICKERS: ${SEC_TICKERS:-}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
@@ -100,6 +102,8 @@ services:
       FRED_SERIES: ${FRED_SERIES:-}
       FX_SERIES: ${FX_SERIES:-}
       OPTIONS_CHAIN_TICKERS: ${OPTIONS_CHAIN_TICKERS:-}
+      SEC_USER_AGENT: ${SEC_USER_AGENT:-}
+      SEC_TICKERS: ${SEC_TICKERS:-}
     # Runs to completion: for manual/ad-hoc runs only. The schedule itself is
     # Airflow's job now (airflow-scheduler below), not this container's.
     restart: "no"
