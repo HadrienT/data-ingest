@@ -95,14 +95,21 @@ class SecClient:
         return {normalize_ticker(row["ticker"]): int(row["cik_str"]) for row in payload.values()}
 
 
-def resolve_ciks(client: SecClient, tickers: List[str]) -> Dict[str, int]:
-    """CIK per ticker; a ticker EDGAR does not list is logged and skipped."""
+def resolve_ciks(client: SecClient, tickers: List[str]) -> Dict[int, str]:
+    """{CIK: its tickers} for the universe, one entry per company.
+
+    A company can have several listed share classes in the universe (GOOG and
+    GOOGL, FOX and FOXA): it is fetched once, and its rows carry every one of
+    those tickers, space-separated in sorted order ("GOOG GOOGL"), so a lookup
+    by either finds it. A ticker EDGAR does not list (an ETF, a delisted or
+    acquired company still in the list) is logged and skipped.
+    """
     known = client.ticker_to_cik()
-    resolved: Dict[str, int] = {}
+    by_cik: Dict[int, List[str]] = {}
     for ticker in tickers:
         cik = known.get(normalize_ticker(ticker))
         if cik is None:
             logger.warning("No CIK for %s; skipped", ticker)
         else:
-            resolved[ticker] = cik
-    return resolved
+            by_cik.setdefault(cik, []).append(ticker)
+    return {cik: " ".join(sorted(set(ts))) for cik, ts in by_cik.items()}

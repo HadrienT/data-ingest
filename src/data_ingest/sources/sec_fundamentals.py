@@ -19,6 +19,10 @@ sometimes with a different value. Keeping each filing's figure, with its
 the point-in-time property `fred-macro` gets from VERSIONED, obtained here from
 the accession number in the key, since EDGAR itself keeps every vintage.
 
+`tickers` holds every ticker of the company in the universe, space-separated
+("GOOG GOOGL"): a company is fetched once, whatever its number of share
+classes, and `cik` is the key to join on.
+
 Instant facts (a balance-sheet figure at a date) have `period_start` NULL and
 `duration_days` 0; flow facts (revenue over a quarter or a year) carry both.
 
@@ -129,7 +133,7 @@ class SecFundamentals(Source):
         name="sec_facts",
         columns=(
             Column("cik", "INTEGER", nullable=False),
-            Column("ticker", "TEXT", nullable=False),
+            Column("tickers", "TEXT", nullable=False),
             Column("taxonomy", "TEXT", nullable=False),
             Column("concept", "TEXT", nullable=False),
             Column("unit", "TEXT", nullable=False),
@@ -147,7 +151,7 @@ class SecFundamentals(Source):
         primary_key=(
             "cik", "taxonomy", "concept", "unit", "period_end", "duration_days", "accession",
         ),
-        indexes=(("ticker", "concept", "period_end"), ("filed",)),
+        indexes=(("filed",),),
     )
 
     def tickers(self) -> List[str]:
@@ -160,12 +164,12 @@ class SecFundamentals(Source):
         client = SecClient()
         filed_since = None if window.full else window.start
         frames = []
-        for ticker, cik in resolve_ciks(client, self.tickers()).items():
+        for cik, tickers in resolve_ciks(client, self.tickers()).items():
             payload = client.get_json(COMPANY_FACTS_URL.format(cik=cik))
             if payload is None:
-                logger.info("%s (CIK %d) has no XBRL facts", ticker, cik)
+                logger.info("%s (CIK %d) has no XBRL facts", tickers, cik)
                 continue
-            rows = list(parse_company_facts(payload, ticker, filed_since))
+            rows = list(parse_company_facts(payload, tickers, filed_since))
             if rows:
                 frames.append(pd.DataFrame(rows, columns=self.table.column_names))
         if not frames:
@@ -180,7 +184,7 @@ class SecFundamentals(Source):
 
 def parse_company_facts(
     payload: dict,
-    ticker: str,
+    tickers: str,
     filed_since: date | None = None,
     concepts: Iterable[Tuple[str, str]] = CONCEPTS,
     forms: Iterable[str] = REPORT_FORMS,
@@ -204,7 +208,7 @@ def parse_company_facts(
                 start = date.fromisoformat(obs["start"]) if obs.get("start") else None
                 yield (
                     cik,
-                    ticker,
+                    tickers,
                     taxonomy,
                     concept,
                     unit,

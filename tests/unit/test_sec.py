@@ -117,7 +117,7 @@ def test_fetch_builds_a_frame_matching_the_table(monkeypatch):
             return FACTS
 
     monkeypatch.setattr(sec_fundamentals, "SecClient", FakeClient)
-    monkeypatch.setattr(sec_fundamentals, "resolve_ciks", lambda client, tickers: {"AAPL": 320193})
+    monkeypatch.setattr(sec_fundamentals, "resolve_ciks", lambda client, tickers: {320193: "AAPL"})
     frame = SecFundamentals().fetch(Window.everything())
     assert list(frame.columns) == SecFundamentals.table.column_names
     assert len(frame) == 4
@@ -147,7 +147,7 @@ def test_filings_fetch(monkeypatch):
             return SUBMISSIONS
 
     monkeypatch.setattr(sec_filings, "SecClient", FakeClient)
-    monkeypatch.setattr(sec_filings, "resolve_ciks", lambda client, tickers: {"AAPL": 320193})
+    monkeypatch.setattr(sec_filings, "resolve_ciks", lambda client, tickers: {320193: "AAPL"})
     frame = SecFilings().fetch(Window.everything())
     assert list(frame.columns) == SecFilings.table.column_names
     assert len(frame) == 2
@@ -158,11 +158,12 @@ def test_ticker_normalisation_and_resolution():
 
     class FakeClient:
         def ticker_to_cik(self):
-            return {"BRK-B": 1067983, "AAPL": 320193}
+            return {"BRK-B": 1067983, "GOOGL": 1652044, "GOOG": 1652044}
 
-    assert sec.resolve_ciks(FakeClient(), ["BRK.B", "AAPL", "NOPE"]) == {
-        "BRK.B": 1067983,
-        "AAPL": 320193,
+    # One entry per company, every share class listed; unknown tickers dropped.
+    assert sec.resolve_ciks(FakeClient(), ["BRK.B", "GOOGL", "GOOG", "NOPE"]) == {
+        1067983: "BRK.B",
+        1652044: "GOOG GOOGL",
     }
 
 

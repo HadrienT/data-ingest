@@ -48,7 +48,7 @@ class SecFilings(Source):
         name="sec_filings",
         columns=(
             Column("cik", "INTEGER", nullable=False),
-            Column("ticker", "TEXT", nullable=False),
+            Column("tickers", "TEXT", nullable=False),
             Column("accession", "TEXT", nullable=False),
             Column("form", "TEXT", nullable=False),
             Column("filed", "DATE", nullable=False),
@@ -59,7 +59,7 @@ class SecFilings(Source):
             Column("sic_description", "TEXT"),
         ),
         primary_key=("cik", "accession"),
-        indexes=(("ticker", "filed"),),
+        indexes=(("filed",),),
     )
 
     def tickers(self) -> List[str]:
@@ -72,7 +72,7 @@ class SecFilings(Source):
         client = SecClient()
         filed_since = None if window.full else window.start
         rows: list = []
-        for ticker, cik in resolve_ciks(client, self.tickers()).items():
+        for cik, tickers in resolve_ciks(client, self.tickers()).items():
             payload = client.get_json(SUBMISSIONS_URL.format(cik=cik))
             if payload is None:
                 continue
@@ -83,7 +83,7 @@ class SecFilings(Source):
                     if page is not None:
                         pages.append(page)
             for page in pages:
-                rows.extend(parse_filings(page, payload, ticker, filed_since))
+                rows.extend(parse_filings(page, payload, tickers, filed_since))
         frame = pd.DataFrame(rows, columns=self.table.column_names)
         return frame.drop_duplicates(subset=list(self.table.primary_key), keep="first")
 
@@ -91,7 +91,7 @@ class SecFilings(Source):
 def parse_filings(
     page: dict,
     company: dict,
-    ticker: str,
+    tickers: str,
     filed_since: date | None = None,
     forms: Iterable[str] = REPORT_FORMS,
 ) -> Iterable[tuple]:
@@ -109,7 +109,7 @@ def parse_filings(
         document = page.get("primaryDocument", [""] * (i + 1))[i]
         yield (
             cik,
-            ticker,
+            tickers,
             accession,
             form,
             filed,
