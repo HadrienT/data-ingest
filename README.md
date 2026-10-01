@@ -27,6 +27,8 @@ among others, and everything runs on a self-hosted server.
 | `ecb-fx` | `fx.ecb_reference_rates` | upsert | `0 16 * * 1-5` |
 | `sec-fundamentals` | `fundamentals.sec_facts` | upsert | `0 5 * * 6` |
 | `sec-filings` | `fundamentals.sec_filings` | upsert | `30 4 * * 6` |
+| `dtcc-swaptions` | `rates.dtcc_swaptions` | upsert | `30 5 * * *` |
+| `dtcc-swap-rates` | `rates.dtcc_swap_rates` | upsert | `35 5 * * *` |
 
 `fred-macro`'s default series cover the Treasury CMT par-yield curve
 (1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX, Moody's Aaa/Baa
@@ -97,6 +99,24 @@ each filing's figure with its `filed` date keeps the table point-in-time.
 Which tag means "revenue" for a given company is left to the consumer. The
 second lists the filings themselves, with the URL of each document, the
 company name and its SIC industry.
+
+`dtcc-swaptions` and `dtcc-swap-rates` read the interest-rate file that
+DTCC's swap data repository publishes every day under the CFTC's public
+dissemination rule: every swap and option traded by a US person, with its
+rates, dates, notional and premium, and no counterparty. It is the only free
+source of *traded* interest-rate option prices — there is no free swaption
+volatility surface, but there are the trades one is built from. The first
+source stores the European swaptions of every currency as published (about
+1,500 messages a day, half of them on USD SOFR swaps); premium over notional,
+inverted through Bachelier's formula, is an implied volatility. The second
+stores a SOFR par swap curve, 1Y to 30Y: the median fixed rate of the day's
+spot-starting swaps per tenor, with its quartiles and the number of trades —
+the curve a swaption's forward rate has to be read on, and the swap curve
+FRED does not have. The rows are raw; the rules a consumer needs (new trades
+only, capped notionals, platform straddles that carry the premium of both
+legs) are in the swaption source's docstring. **The files stay downloadable
+about two years**, then move to cold storage: `--full` backfills that much,
+and a day not ingested in time is gone.
 
 ```bash
 ingest list                  # what exists
