@@ -29,6 +29,7 @@ among others, and everything runs on a self-hosted server.
 | `sec-filings` | `fundamentals.sec_filings` | upsert | `30 4 * * 6` |
 | `dtcc-swaptions` | `rates.dtcc_swaptions` | upsert | `30 5 * * *` |
 | `dtcc-swap-rates` | `rates.dtcc_swap_rates` | upsert | `35 5 * * *` |
+| `rating-default-rates` | `credit.rating_default_rates` | upsert | `0 7 2 * *` |
 
 `fred-macro`'s default series cover the Treasury CMT par-yield curve
 (1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX, Moody's Aaa/Baa
@@ -117,6 +118,23 @@ only, capped notionals, platform straddles that carry the premium of both
 legs) are in the swaption source's docstring. **The files stay downloadable
 about two years**, then move to cold storage: `--full` backfills that much,
 and a day not ingested in time is gone.
+
+`rating-default-rates` stores the historical one-year default rate of each
+rating category — for S&P, Moody's and Fitch, per calendar year: how many of
+the corporate issuers rated `BB` on 1 January defaulted during the year, and
+that count as a percentage. It is what a regulatory capital formula calls a
+probability of default, as opposed to the one a credit spread implies (which
+also pays for bearing the risk, and is several times larger). The agencies'
+own default studies are the usual reference, but their terms forbid storing
+or redistributing the tables; the same statistics, in a regulated format, are
+reported by each agency to ESMA, which publishes them in its central
+repository (CEREP) and allows reproduction with acknowledgement. S&P's
+figures there start in 2000 and, averaged, match its own long-run study to a
+few basis points. Rows are as published — each agency's own scale, percent —
+and a year an agency did not report is absent rather than zero; what a
+consumer must know (the cohort is the agency's EU entity, no denominator is
+published) is in the source's docstring. `--full` takes about twenty minutes:
+the repository answers one query in ten seconds.
 
 ```bash
 ingest list                  # what exists
