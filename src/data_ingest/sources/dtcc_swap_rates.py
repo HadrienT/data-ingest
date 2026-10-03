@@ -8,6 +8,11 @@ swaption's forward rate and annuity must be computed on (`dtcc-swaptions`
 comes from the same file, so the two are consistent), and a swap curve next to
 the Treasury one for anything else.
 
+The euro has two, from the trades a US person is party to: the €STR curve
+(about 400 usable swaps a day) and the Euribor one (about 1,300), the swap
+EUR swaptions are written on. Thinner than SOFR at some tenors, which is what
+the `trades` column is for.
+
 A row is a (date, product, tenor): the median, the quartiles and the number
 of trades behind it. The median, because the file mixes at-market swaps with
 off-market ones (compressions, unwinds, legs of a package); what can be
@@ -42,6 +47,11 @@ logger = logging.getLogger("data_ingest.dtcc")
 #: UPI FISN of the swaps a curve is built from -> their currency.
 PRODUCTS: Mapping[str, str] = {
     "NA/Swap OIS USD": "USD",  # SOFR
+    "NA/Swap OIS EUR": "EUR",  # €STR
+    # Euribor, six months for most of them and three for the rest: the file's
+    # product name does not tell them apart, and the median is the six-month
+    # rate. It is the swap the EUR swaptions of `dtcc-swaptions` are on.
+    "NA/Swap Fxd Flt EUR": "EUR",
 }
 
 TENORS_YEARS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30)
@@ -101,7 +111,7 @@ def parse_swap_rates(
 
 class DtccSwapRates(Source):
     name = "dtcc-swap-rates"
-    description = "Par swap rates by tenor (SOFR, 1Y to 30Y): median fixed rate of the day's traded swaps, from DTCC"
+    description = "Par swap rates by tenor (SOFR, €STR, Euribor; 1Y to 30Y): median fixed rate of the day's traded swaps, from DTCC"
     write_mode = WriteMode.UPSERT
     schedule = "35 5 * * *"
     lookback_days = 7
