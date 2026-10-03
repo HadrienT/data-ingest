@@ -237,6 +237,18 @@ def test_par_rates_need_enough_trades_and_a_plausible_rate():
     assert parse_swap_rates(records(HEADER + stub), DAY) == []
 
 
+def test_the_euro_has_an_estr_curve_and_a_euribor_one():
+    five_years = SWAPS.splitlines()[:4]
+    estr = "\n".join(five_years).replace("NA/Swap OIS USD", "NA/Swap OIS EUR").replace(",USD,", ",EUR,")
+    euribor = estr.replace("NA/Swap OIS EUR", "NA/Swap Fxd Flt EUR")
+    rows = parse_swap_rates(records(HEADER + SWAPS + estr + "\n" + euribor + "\n"), DAY)
+    assert [(r[1], r[2], r[3], r[7]) for r in rows] == [
+        ("NA/Swap Fxd Flt EUR", "EUR", 5, 4),
+        ("NA/Swap OIS EUR", "EUR", 5, 4),
+        ("NA/Swap OIS USD", "USD", 5, 4),
+    ]
+
+
 def test_swap_rates_source_declares_its_contract(monkeypatch):
     source = DtccSwapRates()
     assert source.table.qualified == "rates.dtcc_swap_rates"

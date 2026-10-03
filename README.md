@@ -29,6 +29,7 @@ among others, and everything runs on a self-hosted server.
 | `sec-filings` | `fundamentals.sec_filings` | upsert | `30 4 * * 6` |
 | `dtcc-swaptions` | `rates.dtcc_swaptions` | upsert | `30 5 * * *` |
 | `dtcc-swap-rates` | `rates.dtcc_swap_rates` | upsert | `35 5 * * *` |
+| `dtcc-fx-options` | `fx.dtcc_options` | upsert | `40 5 * * *` |
 | `rating-default-rates` | `credit.rating_default_rates` | upsert | `0 7 2 * *` |
 
 `fred-macro`'s default series cover the Treasury CMT par-yield curve
@@ -110,7 +111,8 @@ volatility surface, but there are the trades one is built from. The first
 source stores the European swaptions of every currency as published (about
 1,500 messages a day, half of them on USD SOFR swaps); premium over notional,
 inverted through Bachelier's formula, is an implied volatility. The second
-stores a SOFR par swap curve, 1Y to 30Y: the median fixed rate of the day's
+stores par swap curves, 1Y to 30Y — SOFR, and for the euro €STR and Euribor,
+the swap EUR swaptions are written on: the median fixed rate of the day's
 spot-starting swaps per tenor, with its quartiles and the number of trades —
 the curve a swaption's forward rate has to be read on, and the swap curve
 FRED does not have. The rows are raw; the rules a consumer needs (new trades
@@ -118,6 +120,19 @@ only, capped notionals, platform straddles that carry the premium of both
 legs) are in the swaption source's docstring. **The files stay downloadable
 about two years**, then move to cold storage: `--full` backfills that much,
 and a day not ingested in time is gone.
+
+`dtcc-fx-options` reads the foreign-exchange file of the same repository:
+the vanilla options of every currency pair, about 5,000 messages a day, a
+quarter of them on EUR/USD, with strike, expiry, the two amounts exchanged at
+exercise and the premium. Implied FX volatilities are not published for free;
+premium over notional, inverted through Garman-Kohlhagen's formula, is one
+(6 to 7 % on EUR/USD in October 2026). Rows are raw, and the rules are in the
+source's docstring: new trades only, capped amounts, one trade reported
+several times, the side the option type refers to. Most trades expire within
+three months and few beyond a year, so a long-dated volatility is an
+extrapolation. Barrier, digital and non-deliverable options are left out.
+A file is 3 MB and 70,000 rows: **backfill with `--since`, a few months at a
+time**, rather than `--full`, which holds two years of rows in memory at once.
 
 `rating-default-rates` stores the historical one-year default rate of each
 rating category — for S&P, Moody's and Fitch, per calendar year: how many of
