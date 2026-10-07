@@ -45,7 +45,9 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   fail "uncommitted changes to tracked files: commit or stash them before deploying"
 fi
 
-if [[ $CHECK_ONLY -eq 0 ]]; then
+# scripts/auto-deploy.sh sets DEPLOY_NO_PULL=1: it deploys exactly the commit
+# whose CI it checked.
+if [[ $CHECK_ONLY -eq 0 && -z "${DEPLOY_NO_PULL:-}" ]]; then
   # Non-fatal, like the other deploy scripts: offline, deploy the checkout.
   git pull --ff-only --quiet 2>/dev/null &&
     echo "→ synced with $(git rev-parse --abbrev-ref '@{u}')" ||

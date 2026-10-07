@@ -1,0 +1,13 @@
+# Runs autodeploy@%i.service every two minutes. A tick with nothing new on
+# origin/main is one `git fetch`. See autodeploy@.service.
+
+[Unit]
+Description=Poll origin/main of ~/%i for a commit to deploy
+
+[Timer]
+OnCalendar=*:0/2
+AccuracySec=10s
+RandomizedDelaySec=20s
+
+[Install]
+WantedBy=timers.target

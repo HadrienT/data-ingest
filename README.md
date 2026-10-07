@@ -261,7 +261,27 @@ docker compose up -d airflow-init   # once: migrates Airflow's metadata DB
 docker compose up -d                # scheduler, api-server, dag-processor, triggerer
 ```
 
-**Updating** — after a merge, or a new source — is one command, from `main`:
+**Updating is automatic**: merging into `main` deploys. Every two minutes a
+systemd user timer runs `scripts/auto-deploy.sh`, which does nothing until
+`origin/main` moves, waits for that commit's CI to be green, then
+fast-forwards and runs `scripts/deploy.sh`. If the deploy fails (build, Airflow
+health, a DAG import error) it goes back to the previous commit, deploys that
+again and leaves the unit `failed`; the failed commit is not retried, push a
+fix. Each attempt is listed under the repository's *Deployments* on GitHub.
+
+```bash
+cp deploy/autodeploy@.service deploy/autodeploy@.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now autodeploy@data-ingest.timer
+journalctl --user -u 'autodeploy@*' -f
+```
+
+It only acts when this checkout is on a clean `main` (it is also where the
+code is written): on a work branch, or with uncommitted changes, it says so in
+the journal and waits. The rollback covers the code and the images, not the
+data: a table a new source created, or rows it wrote, stay.
+
+By hand — the same thing, from `main`:
 
 ```bash
 scripts/deploy.sh           # pull, rebuild, restart what changed, verify
