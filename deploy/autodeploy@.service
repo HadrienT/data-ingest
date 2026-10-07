@@ -1,0 +1,23 @@
+# One tick of the continuous deployment of ~/%i (see scripts/auto-deploy.sh).
+# A systemd **user** template, shared by the repositories that deploy this way:
+# the instance name is the folder under the home directory.
+#
+# Install (once per machine), then enable one timer per folder:
+#   cp deploy/autodeploy@.service deploy/autodeploy@.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now autodeploy@data-ingest.timer
+#
+# Follow it:  journalctl --user -u 'autodeploy@*' -f
+# A failed deploy that was rolled back leaves the unit `failed`
+# (`systemctl --user --failed`) until the next successful tick.
+
+[Unit]
+Description=Deploy ~/%i when origin/main moves and its CI is green
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/%i
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/bash scripts/auto-deploy.sh
+# A build can be long (quant-modeling compiles C++ and CUDA).
+TimeoutStartSec=0
