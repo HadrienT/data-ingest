@@ -22,7 +22,7 @@ from airflow.sdk import DAG, Param, task
 
 from data_ingest.config import dsn
 from data_ingest.core.database import Database
-from data_ingest.core.runner import run_source
+from data_ingest.core.runner import routine_window, run_source
 from data_ingest.core.source import Window
 from data_ingest.registry import all_sources, get_source
 
@@ -33,8 +33,9 @@ DEFAULT_ARGS = {
 }
 
 # Fixed, safely-past start date: schedules are daily/weekday crons with no
-# backfill semantics of their own (a source's `default_window` lookback
-# handles a missed run), so catchup stays off and this date only matters as
+# backfill semantics of their own (`routine_window` handles a missed run: the
+# source's lookback, or everything since the last stored date), so catchup
+# stays off and this date only matters as
 # "before which Airflow has nothing to schedule".
 START_DATE = pendulum.datetime(2025, 1, 1, tz="UTC")
 
@@ -67,7 +68,7 @@ def _build_dag(source_name: str) -> DAG:
         def run(params: dict) -> int:
             db = Database(dsn())
             src = get_source(source_name)
-            window = Window.everything() if params.get("full") else src.default_window()
+            window = Window.everything() if params.get("full") else routine_window(db, src)
             return run_source(db, src, window)
 
         run()

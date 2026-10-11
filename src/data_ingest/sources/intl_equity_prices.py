@@ -48,6 +48,7 @@ class IntlEquityPrices(Source):
     # continent closed earlier. The lookback absorbs a late correction.
     schedule = "30 18 * * 1-5"
     lookback_days = 5
+    catch_up_on = "date"
 
     table = TableSpec(
         schema="prices",

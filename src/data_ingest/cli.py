@@ -17,7 +17,7 @@ from typing import List, Optional
 
 from .config import LOG_LEVEL, dsn
 from .core.database import Database
-from .core.runner import run_source
+from .core.runner import routine_window, run_source
 from .core.source import Window
 from .registry import all_sources, get_source
 
@@ -54,7 +54,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         elif args.since:
             window = Window(start=date.fromisoformat(args.since), end=date.today())
         else:
-            window = source.default_window()
+            window = routine_window(db, source)
         try:
             run_source(db, source, window)
         except Exception:

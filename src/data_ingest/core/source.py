@@ -67,6 +67,13 @@ class Source(ABC):
     #: a missed run or a late upstream correction is picked up by the next one.
     lookback_days: int = 5
 
+    #: The DATE column that says how far the table goes. When set, a routine
+    #: run starts at the last date stored if that is older than the lookback:
+    #: after a week with the machine off, the missed days are fetched rather
+    #: than left as a hole no later run would look at. For sources whose
+    #: `fetch` honours `window.start`; None keeps the plain lookback.
+    catch_up_on: Optional[str] = None
+
     @abstractmethod
     def fetch(self, window: Window) -> pd.DataFrame:
         """Return rows for the window, with columns matching the table spec.

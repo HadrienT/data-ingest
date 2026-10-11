@@ -2,6 +2,19 @@
 
 Leading underscore so the registry's auto-discovery (data_ingest.registry)
 skips this module -- it has nothing that is itself a Source.
+
+Two conventions hold for every row it returns:
+
+- **Prices are not adjusted for dividends** (`auto_adjust=False`, Yahoo's
+  "Close"). yfinance 1.x adjusts by default, as of the download date: a
+  routine run that rewrites the last few days would then store rows adjusted
+  at different dates, and the return across an ex-date would be wrong. Yahoo
+  still restates its whole history after a split, which a routine run does
+  not: a split calls for a `--full` run.
+- **A missing quote is a missing row.** yfinance pads a multi-ticker frame
+  with NaN rows: a weekend for every ticker downloaded next to a crypto
+  pair, a day one ticker failed. Stored, such a row would overwrite a good
+  quote with NULL on the next upsert.
 """
 
 from __future__ import annotations
@@ -30,6 +43,7 @@ def download_daily_ohlcv(tickers: List[str], start: str, end: str) -> pd.DataFra
     gets unreliable well beyond that), retrying each chunk on failure. One
     chunk failing after every retry does not take the others with it -- it is
     simply missing from the result, same as a holiday with nothing published.
+    A (date, ticker) without a single price is left out as well.
     """
     frames = []
     for batch in _chunked(tickers, CHUNK_SIZE):
@@ -64,6 +78,7 @@ def _download_chunk(tickers: List[str], start: str, end: str) -> pd.DataFrame:
                 interval="1d",
                 group_by="ticker",
                 threads=True,
+                auto_adjust=False,
             )
             if not data.empty:
                 return data
@@ -91,6 +106,8 @@ def _normalize(df: pd.DataFrame, tickers: List[str]) -> pd.DataFrame:
     for col in ("Open", "High", "Low", "Close", "Volume"):
         if col in data.columns:
             data[col] = pd.to_numeric(data[col], errors="coerce")
+    prices = [c for c in ("Open", "High", "Low", "Close") if c in data.columns]
+    data = data.dropna(subset=prices, how="all")
     if "Volume" in data.columns:
         data["Volume"] = data["Volume"].fillna(0).astype("int64")
     return data
