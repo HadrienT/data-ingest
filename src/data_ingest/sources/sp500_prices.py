@@ -10,8 +10,11 @@ downloaded (the bulk of the history in one load, then day by day), so the
 return across an ex-date in that part is not reliable. `--full` rewrites the
 whole table under the one convention.
 
-A day without a quote has no row. The tickers file also lists a few indices,
-futures and crypto pairs; the latter quote on weekends.
+A day without a quote has no row.
+
+The universe is the S&P 500 as the membership history gives it (today's
+members, and for two years those that left: see `_constituents`), plus
+`EXTRAS`. It follows the index without a list to keep by hand.
 """
 
 from __future__ import annotations
@@ -24,8 +27,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pandas_market_calendars as mcal
 
+from ._constituents import sp500_priced
 from ._yfinance_common import download_daily_ohlcv
-from ..config import DATA_DIR
 from ..core.source import Source, Window
 from ..core.spec import Column, TableSpec, WriteMode
 
@@ -33,6 +36,16 @@ logger = logging.getLogger("data_ingest.sp500_prices")
 
 MARKET_TZ = "America/New_York"
 MARKET_CALENDAR = "NYSE"
+
+#: What this table has always carried beside the index's members, and that
+#: quant-modeling reads from it: indices, a few ETFs, front-month futures and
+#: crypto pairs (which quote on weekends).
+EXTRAS = (
+    "^GSPC", "^DJI", "^IXIC", "^TYX", "^FCHI", "^GDAXI", "^FTSE", "^N225",
+    "SPY", "QQQ", "IWM", "VTI", "URTH", "EEM", "TLT", "GLD",
+    "CL=F", "BZ=F", "GC=F", "SI=F", "HG=F",
+    "BTC-USD", "ETH-USD", "BNB-USD", "XRP-USD",
+)
 
 #: yfinance's capitalised names, mapped to the table's lowercase columns.
 FIELDS = {
@@ -77,8 +90,7 @@ class SP500Prices(Source):
     )
 
     def tickers(self) -> List[str]:
-        path = DATA_DIR / "tickers.csv"
-        return pd.read_csv(path, header=None)[0].dropna().astype(str).tolist()
+        return sorted(set(sp500_priced()) | set(EXTRAS))
 
     def fetch(self, window: Window) -> pd.DataFrame:
         tickers = self.tickers()

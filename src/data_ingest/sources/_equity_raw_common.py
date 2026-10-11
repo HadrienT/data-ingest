@@ -52,10 +52,9 @@ error: Danaher gains 39 % on 2016-07-05 where its holders gained 4 %.
 A window is self-contained as long as it runs to today: the splits after a
 day of the window are in the window. Every download does.
 
-Universe: the current S&P 500 members and the tickers of `sp500-prices`
-(`data/sp500_membership.csv`, `data/tickers.csv`), plus `ETFS`, a universe
-free of survivorship bias for a backtest to default to, and the S&P 500
-total-return index. **Companies that left the index and were delisted are
+Universe: the S&P 500 members of today and of the last two years
+(`_constituents.sp500_priced`), plus `ETFS`, a universe free of survivorship
+bias for a backtest to default to, and the S&P 500 total-return index. **Companies that left the index and were delisted are
 not there**: Yahoo drops a delisted ticker with its history, and nobody
 gives those prices away. `sp500-membership` restricts the universe at each
 date to the names that were in the index then; it cannot bring back the
@@ -72,8 +71,8 @@ from typing import List, Tuple
 import numpy as np
 import pandas as pd
 
+from ._constituents import sp500_priced
 from ._yfinance_common import download_daily_ohlcv
-from ..config import DATA_DIR
 from ..core.source import Window
 
 logger = logging.getLogger("data_ingest.equity_raw")
@@ -84,6 +83,7 @@ HISTORY_START = "2000-01-01"
 #: badly, so a backtest on these has no survivorship bias.
 ETFS = (
     "SPY", "QQQ", "IWM", "EFA", "EEM",          # US large, Nasdaq 100, US small, developed, emerging
+    "VTI", "URTH",                              # US total market, MSCI World
     "TLT", "IEF", "LQD", "HYG",                 # long and medium Treasuries, IG and HY credit
     "GLD",                                      # gold
     # The eleven SPDR sector funds.
@@ -99,16 +99,7 @@ PRICES = ["Open", "High", "Low", "Close"]
 
 def universe() -> List[str]:
     """Every ticker asked of Yahoo, sorted."""
-    listed = pd.read_csv(DATA_DIR / "tickers.csv", header=None)[0].dropna().astype(str)
-    # tickers.csv also feeds sp500-prices with indices, futures and crypto
-    # pairs: no corporate action there, and nothing a share book can hold.
-    stocks = {t for t in listed if not (t.startswith("^") or t.endswith("=F") or t.endswith("-USD"))}
-    return sorted(stocks | set(current_members()) | set(ETFS) | {TOTAL_RETURN_INDEX})
-
-
-def current_members() -> List[str]:
-    members = pd.read_csv(DATA_DIR / "sp500_membership.csv", dtype=str, keep_default_na=False)
-    return sorted(members.loc[members["date_removed"] == "", "ticker"])
+    return sorted(set(sp500_priced()) | set(ETFS) | {TOTAL_RETURN_INDEX})
 
 
 def window_start(window: Window) -> str:

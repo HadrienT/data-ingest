@@ -37,11 +37,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from ..config import DATA_DIR
+from ._constituents import SP500_MEMBERSHIP_FILE as MEMBERSHIP_FILE
 from ..core.source import Source, Window
 from ..core.spec import Column, TableSpec, WriteMode
-
-MEMBERSHIP_FILE = DATA_DIR / "sp500_membership.csv"
 
 
 def load() -> pd.DataFrame:

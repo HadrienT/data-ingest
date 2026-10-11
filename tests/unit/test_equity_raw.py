@@ -10,6 +10,7 @@ import pytest
 
 from data_ingest.core.source import Window
 from data_ingest.sources import _equity_raw_common as raw
+from data_ingest.sources._constituents import sp500_members
 from data_ingest.sources.equity_dividends import EquityDividends
 from data_ingest.sources.equity_raw_prices import EquityRawPrices
 from data_ingest.sources.equity_splits import EquitySplits
@@ -206,10 +207,10 @@ def test_a_dividend_and_a_split_the_same_day_are_reported():
 def test_the_universe_is_stocks_etfs_and_the_total_return_index():
     universe = raw.universe()
     assert universe == sorted(set(universe))
-    assert set(raw.ETFS) <= set(universe) and len(raw.ETFS) == 21
+    assert set(raw.ETFS) <= set(universe) and len(raw.ETFS) == 23
     assert {"AAPL", "BRK-B", "^SP500TR"} <= set(universe)
-    assert set(raw.current_members()) <= set(universe)
-    # Indices, futures and crypto pairs of tickers.csv have no place in a share book.
+    assert set(sp500_members()) <= set(universe)
+    # The futures and crypto pairs of sp500-prices have no place in a share book.
     assert not [t for t in universe if t.endswith("=F") or t.endswith("-USD")]
     assert [t for t in universe if t.startswith("^")] == ["^SP500TR"]
 

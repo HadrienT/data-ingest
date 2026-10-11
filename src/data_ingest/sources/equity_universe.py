@@ -1,9 +1,10 @@
 """Which ticker belongs to which market: the index constituent lists, as a table.
 
 quant-modeling reads it to offer "market, then ticker" and to know each
-ticker's currency. It covers the S&P 500 (data/tickers.csv, which has symbols
-only — no names) and CAC 40, DAX, FTSE 100, Nikkei 225 (data/constituents/,
-with names, the index itself, and the quote currency checked on Yahoo).
+ticker's currency. It covers the S&P 500 (the universe of `sp500-prices`,
+symbols only — no names) and CAC 40, DAX, FTSE 100, Nikkei 225
+(data/constituents/, with names, the index itself, and the quote currency
+checked on Yahoo).
 
 A ticker can sit in two markets (Airbus is in the CAC 40 and the DAX), hence
 the key (market, ticker). Rows are upserted, so a company that LEAVES an index
@@ -17,7 +18,7 @@ from __future__ import annotations
 import pandas as pd
 
 from ._constituents import all_members
-from ..config import DATA_DIR
+from .sp500_prices import SP500Prices
 from ..core.source import Source, Window
 from ..core.spec import Column, TableSpec, WriteMode
 
@@ -50,14 +51,14 @@ class EquityUniverse(Source):
             (m.market, m.ticker, m.name or None, m.kind, m.currency, m.as_of)
             for m in all_members()
         ]
-        # The S&P 500 list predates this table and carries no names and no
-        # date: the run date stands in as its as_of (the list in force today).
-        # It also holds a few index symbols (^GSPC, ^DJI… and the CAC 40, DAX,
-        # FTSE 100 and Nikkei 225 indices): a ^ symbol is an index, and one
-        # that belongs to another market is listed there only, in its own
-        # currency — not as a USD member of the S&P 500.
+        # The S&P 500 side is everything sp500-prices quotes, with no names
+        # and no date: the run date stands in as its as_of (the list in force
+        # today). It also holds a few index symbols (^GSPC, ^DJI… and the
+        # CAC 40, DAX, FTSE 100 and Nikkei 225 indices): a ^ symbol is an
+        # index, and one that belongs to another market is listed there only,
+        # in its own currency — not as a USD member of the S&P 500.
         elsewhere = {m.ticker for m in all_members()}
-        sp500 = pd.read_csv(DATA_DIR / "tickers.csv", header=None)[0].dropna().astype(str)
+        sp500 = SP500Prices().tickers()
         today = pd.Timestamp.now(tz="UTC").date().isoformat()
         rows += [
             ("SP500", t, None, "index" if t.startswith("^") else "equity", "USD", today)

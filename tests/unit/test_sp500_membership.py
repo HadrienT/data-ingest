@@ -6,6 +6,8 @@ from datetime import date
 import pytest
 
 from data_ingest.core.source import Window
+from data_ingest.sources._constituents import sp500_members, sp500_priced
+from data_ingest.sources.sp500_prices import SP500Prices
 from data_ingest.sources.sp500_membership import SP500Membership, load, members_on
 
 HISTORY_START = date(1996, 1, 2)
@@ -72,3 +74,21 @@ def test_source_contract(history):
     assert list(frame.columns) == source.table.column_names
     assert len(frame) == len(history) > 1200
     assert frame["as_of"].nunique() == 1
+
+
+def test_the_priced_universe_is_the_members_and_those_who_left_recently(history):
+    today = date(2026, 10, 11)
+    priced = set(sp500_priced(today))
+    assert set(sp500_members()) <= priced
+    # Molson Coors left on 2026-09-21: still priced. Lehman is long gone.
+    assert "TAP" in priced and "TAP" not in sp500_members()
+    assert "LEHMQ" not in priced
+    # Two years on, it is dropped.
+    assert "TAP" not in sp500_priced(date(2028, 10, 1))
+
+
+def test_sp500_prices_follows_the_index_and_keeps_its_extras():
+    tickers = SP500Prices().tickers()
+    assert tickers == sorted(set(tickers))
+    assert set(sp500_members()) <= set(tickers)
+    assert {"^GSPC", "SPY", "CL=F", "BTC-USD"} <= set(tickers)

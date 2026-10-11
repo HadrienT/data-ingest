@@ -9,7 +9,8 @@ commit it:
 Why a committed file rather than scraping at every run: the list then changes
 only through a reviewed commit, a Wikipedia vandalism or layout change cannot
 silently empty a market overnight, and the ingestion itself needs no network
-beyond the price download. The same reason `sp500-prices` reads tickers.csv.
+beyond the price download. The S&P 500 has its own script, for the same
+reason: refresh_sp500_membership.py.
 
 Sources — free, and reusable (Wikipedia, CC BY-SA):
   CAC 40, DAX, FTSE 100  English Wikipedia constituent tables
