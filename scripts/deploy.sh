@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Rebuild and restart data-ingest's scheduled stack: the store and Airflow.
+# Rebuild and restart data-ingest's stack: the store, Airflow and the order
+# book capture.
 #
 #   scripts/deploy.sh           deploy main (pull, build, restart, verify)
 #   scripts/deploy.sh --check   every check, nothing built or restarted
@@ -17,6 +18,11 @@
 # default command is `run --all` — a bare `docker compose up -d` would run
 # every source at once as a side effect.
 #
+# The capture is a connection that stays open: recreating it leaves a hole of
+# a few seconds in the day's file (marked as such, and followed by a fresh
+# book). Compose only recreates it when the image changed, that is when a
+# commit touched src/, pyproject.toml or README.md (the Dockerfile copies them).
+#
 # Idempotent: with nothing new, the build is cached and no container is
 # recreated. Newly registered DAGs start paused (AIRFLOW__CORE__DAGS_ARE_
 # PAUSED_AT_CREATION): the script lists them with the command to enable them,
@@ -29,6 +35,7 @@ CHECK_ONLY=0
 
 STORE=(postgres airflow-postgres)
 AIRFLOW=(airflow-apiserver airflow-scheduler airflow-dag-processor airflow-triggerer)
+CAPTURE=(capture)
 
 fail() {
   echo "✗ $*" >&2
@@ -71,6 +78,20 @@ for d in airflow/logs airflow/plugins airflow/config; do
     fail "$d is owned by uid $owner, Airflow runs as $uid: docker run --rm -v \"\$PWD/airflow:/a\" alpine chown -R $uid:0 /a/logs /a/plugins /a/config"
 done
 
+# The capture writes as CAPTURE_UID into this bind mount, and Airflow reads
+# it. Left to Docker it is created root-owned and the capture cannot write.
+env_value() { grep -E "^$1=" .env | cut -d= -f2- || true; }
+capture_dir="$(env_value CAPTURE_DIR)"
+capture_dir="${capture_dir:-./data/capture}"
+capture_uid="$(env_value CAPTURE_UID)"
+capture_uid="${capture_uid:-1000}"
+[[ $CHECK_ONLY -eq 1 ]] || mkdir -p "$capture_dir"
+if [[ -d "$capture_dir" ]]; then
+  owner="$(stat -c %u "$capture_dir")"
+  [[ "$owner" == "$capture_uid" ]] ||
+    fail "$capture_dir is owned by uid $owner, the capture runs as $capture_uid: set CAPTURE_UID in .env or chown the directory"
+fi
+
 COMMIT_SHA="$(git rev-parse --short HEAD)"
 if [[ $CHECK_ONLY -eq 1 ]]; then
   echo "✓ ready to deploy $COMMIT_SHA (--check: nothing built or restarted)"
@@ -80,7 +101,7 @@ fi
 # ── Build and restart ────────────────────────────────────────────────────────
 echo "→ deploying $COMMIT_SHA"
 docker compose build
-docker compose up -d "${STORE[@]}" airflow-init "${AIRFLOW[@]}"
+docker compose up -d "${STORE[@]}" airflow-init "${AIRFLOW[@]}" "${CAPTURE[@]}"
 
 # ── Health gate ──────────────────────────────────────────────────────────────
 echo -n "→ waiting for Airflow to be healthy "
@@ -128,6 +149,12 @@ if [[ -n "$paused" ]]; then
     echo "    docker compose exec airflow-scheduler airflow dags unpause $dag"
   done <<<"$paused"
 fi
+
+# The capture has no dependency to wait for: it is recording or it is not.
+id="$(docker compose ps -q "${CAPTURE[@]}")"
+[[ -n "$id" && "$(docker inspect -f '{{.State.Running}}' "$id" 2>/dev/null)" == "true" ]] ||
+  fail "the capture is not running: docker compose logs --tail 30 capture"
+echo "→ capture running, writing to $capture_dir"
 
 docker image prune -f >/dev/null
 echo "✓ deployed $COMMIT_SHA"

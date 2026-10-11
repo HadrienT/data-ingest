@@ -11,6 +11,10 @@ It grew out of a single hardcoded S&P 500 pipeline that ran on Google Cloud
 (Cloud Scheduler → Cloud Function → BigQuery). That pipeline is now one source
 among others, and everything runs on a self-hosted server.
 
+One thing here is not a scheduled run: the [order book capture](#order-book-capture),
+a connection that stays open and records a crypto exchange's order book into
+files, for `quant-microstructure` to replay.
+
 ## Sources
 
 | Source | Table | Write mode | Schedule (cron, UTC) |
@@ -36,6 +40,7 @@ among others, and everything runs on a self-hosted server.
 | `equity-splits` | `prices.splits` | upsert | `25 22 * * 1-5` |
 | `sp500-membership` | `prices.sp500_membership` | upsert | `10 6 * * 1` |
 | `french-factors` | `factors.french_daily` | versioned | `0 9 * * 6` |
+| `capture-catalogue` | `microstructure.capture_files` | upsert | `*/15 * * * *` |
 
 `fred-macro`'s default series cover the Treasury CMT par-yield curve
 (1M → 30Y), T-Bill discount rates, SOFR/Fed Funds, VIX, Moody's Aaa/Baa
@@ -289,6 +294,77 @@ back, over the source's lookback. For a source that declares `catch_up_on`
 (the daily price sources), that run starts at the last date stored instead
 when it is older: a two-week outage is fetched whole, not left as a hole.
 
+## Order book capture
+
+`ingest capture` records Bitstamp's public order-by-order feed for BTC/USD:
+every order created, changed and deleted, with its id. No account, no key. It
+is the one long-running service of this repository (the `capture` service of
+`docker-compose.yml`), and it writes files, not rows: the consumer,
+`quant-microstructure`, replays a whole day in order, which a file does
+without a query (its ADR-015).
+
+```
+data/capture/bitstamp/btcusd/btcusd-2026-10-12.qmev            the events
+data/capture/bitstamp/btcusd/btcusd-2026-10-12.json            the sidecar
+data/capture/bitstamp/btcusd/btcusd-2026-10-12.checkpoints.gz  the exchange's snapshots
+```
+
+**The events** are in the format of `quant-microstructure`
+(`feed/event_file.hpp`): an 8-byte header, then 50-byte little-endian records
+— exchange time, receive time, sequence number, order id, price, quantity,
+type (Add, Cancel, Trade, Clear) and side. Prices are whole ticks (cents),
+quantities whole lots (1e-8 BTC), times nanoseconds since the Unix epoch. One
+file per UTC day; each starts with a Clear and the whole book, so a day
+replays on its own, and numbers its events from 1.
+
+**The sidecar** says what version 1 of the format cannot: that the stream is
+order by order, the tick and the lot, and how the day went (events, time
+range, holes, reconnections, defects, latency).
+
+**How a Bitstamp message becomes an event** was read off the feed and is
+written at the top of `capture/bitstamp.py`. The one thing that is not
+obvious: an order that trades on arrival is announced as created, then deleted
+at the price it traded at. It never rested, so it gives no event of its own;
+the Trade is the fill of the resting order it hit, signed by the aggressor.
+
+**Quality.** Three checks run while recording, and each failure leaves a hole
+in the numbering of the file (one number skipped), followed by a Clear and a
+fresh book, as `quant-microstructure` expects:
+
+- every message names the one before it: a mismatch is a lost message;
+- every ten minutes the book is compared with the one the exchange publishes,
+  and that snapshot is kept as a checkpoint;
+- the connection dropping, or going silent for 30 seconds.
+
+A crossed book and messages about orders the recorder never saw are counted
+in the sidecar. Both clocks are kept on every event; Bitstamp's is cut to the
+millisecond.
+
+```bash
+ingest capture                                    # record until stopped
+ingest capture-verify data/capture/bitstamp/btcusd/btcusd-2026-10-12.qmev
+```
+
+`capture-verify` replays a day the way `quant-microstructure` will, with a
+book that refuses an invalid event, and compares it at each checkpoint with
+what the exchange published: every order, its side, price and quantity. Since
+the exchange's times are cut to the millisecond, the orders touched in the
+millisecond of a snapshot are left out of that comparison.
+
+**The catalogue** is the scheduled part. The capture never touches Postgres,
+so it records through a database outage; `capture-catalogue` reads the
+sidecars every 15 minutes and keeps one row per file in
+`microstructure.capture_files`: path, time range, size, events, holes,
+checks. Files to database, never the reverse.
+
+**Volume**, from ten minutes on a Sunday evening (11 October 2026): about 120
+events a second, which is 10 million events and 0.5 GB a day, plus 15 MB of
+checkpoints. A full day has not been measured yet. Nothing is compressed or
+deleted: retention is still to be decided, on a measured week.
+
+`CAPTURE_DIR` in `.env` is where the files go on the host (default
+`./data/capture`, git-ignored); `quant-microstructure` reads them there.
+
 ## Running it
 
 Requirements: Docker with the Compose plugin; Python 3.11 to run the tests
@@ -308,6 +384,11 @@ docker compose run --rm ingest run sp500-prices --full   # first backfill
 mkdir -p airflow/logs airflow/plugins airflow/config
 docker compose up -d airflow-init   # once: migrates Airflow's metadata DB
 docker compose up -d                # scheduler, api-server, dag-processor, triggerer
+
+# the order book capture: its directory must exist and be yours first, for
+# the same reason (it runs as CAPTURE_UID)
+mkdir -p data/capture
+docker compose up -d capture
 ```
 
 **Updating is automatic**: merging into `main` deploys. Every two minutes a
@@ -347,6 +428,11 @@ fails on a DAG import error, and lists the DAGs still paused. It never starts
 the `ingest` service, whose default command runs every source — which a bare
 `docker compose up -d` does.
 
+It also starts the capture. A deploy that changes the image (any commit that
+touches `src/`, `pyproject.toml` or this README) recreates that container: a few seconds
+of the feed are lost, the day's file says so (a hole, then a fresh book), and
+the recording goes on in the same file.
+
 The Airflow UI is at `http://127.0.0.1:8080` (login: `AIRFLOW_ADMIN_USER` /
 `AIRFLOW_ADMIN_PASSWORD` from `.env`). DAGs start paused; unpause the ones you
 want to run on their schedule.
@@ -358,7 +444,7 @@ Everything binds to `127.0.0.1`; nothing here is reachable off the server.
 ```bash
 pip install -e ".[dev]"
 pytest -m "not network"    # unit tests plus integration, no upstream API needed
-pytest                     # adds the live yfinance and FRED tests
+pytest                     # adds the live yfinance, FRED and Bitstamp tests
 ```
 
 Tests marked `postgres` skip themselves when no database is reachable. Tests
