@@ -47,8 +47,9 @@ Barrier, digital and non-deliverable options are left out: their premium
 does not invert to a Garman-Kohlhagen volatility.
 
 Key: `dissemination_id`, DTCC's identifier of the message. UPSERT, and a
-routine run re-reads a week: a file is cumulative over its UTC day, so the
-current day is partial until midnight and is completed by the next run.
+routine run re-reads a week. A file is cumulative over its UTC day but is
+published once that day is over: until then it answers 403 and the day is
+skipped, to be read by the next run.
 
 Files stay downloadable about two years (see `_dtcc_common`): `--full`
 backfills that much and no more, and downloads about 3 MB a day.
@@ -128,7 +129,7 @@ class DtccFxOptions(Source):
     name = "dtcc-fx-options"
     description = "Vanilla FX option trades (pair, strike, expiry, amounts, premium) from DTCC's public dissemination"
     write_mode = WriteMode.UPSERT
-    # The file of a UTC day is complete after midnight UTC.
+    # The file of a UTC day is published after midnight UTC.
     schedule = "40 5 * * *"
     lookback_days = 7
 
