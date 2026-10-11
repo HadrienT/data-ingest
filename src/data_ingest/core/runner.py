@@ -16,11 +16,31 @@ Airflow's own retry/alerting takes over.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from .database import Database
 from .source import Source, Window
 
 logger = logging.getLogger("data_ingest")
+
+
+def routine_window(db: Database, source: Source) -> Window:
+    """The window of a routine run: the source's lookback, stretched back to
+    the last date stored when the previous run is older than that.
+
+    The scheduler does not catch up (`catchup=False`): when the machine was
+    off for longer than the lookback, the next run alone would leave the days
+    in between missing for good. See `Source.catch_up_on`.
+    """
+    window = source.default_window()
+    column = source.catch_up_on
+    if column is None or window.full or window.start is None or not db.table_exists(source.table):
+        return window
+    _, last = db.bounds(source.table, column)
+    if last is None or last >= window.start:
+        return window
+    logger.info("[%s] last stored %s is %s, catching up from there", source.name, column, last)
+    return replace(window, start=last)
 
 
 def run_source(db: Database, source: Source, window: Window) -> int:

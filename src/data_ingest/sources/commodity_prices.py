@@ -51,6 +51,7 @@ class CommodityPrices(Source):
     # align to here -- a plain lookback window is enough.
     schedule = "30 23 * * 1-5"
     lookback_days = 5
+    catch_up_on = "date"
 
     table = TableSpec(
         schema="prices",

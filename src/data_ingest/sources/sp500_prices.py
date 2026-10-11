@@ -1,7 +1,17 @@
 """Daily OHLCV for the S&P 500 constituents, from yfinance.
 
 The original pipeline this grew out of ran as a GCP Cloud Function writing to
-BigQuery; the download and normalisation logic is carried over unchanged.
+BigQuery.
+
+`close` is Yahoo's "Close": restated for later splits, not adjusted for
+dividends (see `_yfinance_common`). Rows written before 2026-10 do not all
+follow that: each was adjusted for the dividends known the day it was
+downloaded (the bulk of the history in one load, then day by day), so the
+return across an ex-date in that part is not reliable. `--full` rewrites the
+whole table under the one convention.
+
+A day without a quote has no row. The tickers file also lists a few indices,
+futures and crypto pairs; the latter quote on weekends.
 """
 
 from __future__ import annotations
@@ -46,6 +56,7 @@ class SP500Prices(Source):
     # and the lookback means the next run corrects it.
     schedule = "0 22 * * 1-5"
     lookback_days = 5
+    catch_up_on = "date"
 
     table = TableSpec(
         schema="prices",

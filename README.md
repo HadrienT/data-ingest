@@ -42,7 +42,9 @@ between the par yields and the T-Bills it carries everything
 `commodity-prices` and `fx-rates` share their download/fetch mechanics with
 `sp500-prices` and `fred-macro` respectively (`_yfinance_common.py`,
 `_fred_common.py` — leading underscore so the registry does not mistake them
-for sources of their own).
+for sources of their own). The yfinance price sources store Yahoo's "Close":
+restated for splits, **not adjusted for dividends**, and no row at all for a
+day without a quote.
 
 `options-chain-snapshot` is different from the other yfinance sources in one
 important way: yfinance only ever exposes the *current* option chain, never a
@@ -239,6 +241,11 @@ Retries (3, 2 minutes apart) and a 30-minute timeout per run mirror what the
 old systemd unit did. A full backfill (`Window.everything()`, what `--full`
 does on the CLI) is a checkbox on "Trigger DAG w/ config" in the UI, not a
 flag you have to know to type over SSH.
+
+`catchup` is off, so a host that was down runs each DAG once when it comes
+back, over the source's lookback. For a source that declares `catch_up_on`
+(the daily price sources), that run starts at the last date stored instead
+when it is older: a two-week outage is fetched whole, not left as a hole.
 
 ## Running it
 
