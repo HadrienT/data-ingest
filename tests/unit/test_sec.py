@@ -167,10 +167,10 @@ def test_ticker_normalisation_and_resolution():
     }
 
 
-def test_universe_is_sp500_equities_without_index_symbols():
+def test_universe_is_todays_sp500_members():
     tickers = sec.sp500_tickers()
-    assert "AAPL" in tickers and len(tickers) > 450
-    assert not any(t.startswith("^") for t in tickers)
+    assert "AAPL" in tickers and 480 <= len(tickers) <= 520
+    assert not any(t.startswith("^") or t.endswith("=F") or t.endswith("-USD") for t in tickers)
 
 
 class _Response:

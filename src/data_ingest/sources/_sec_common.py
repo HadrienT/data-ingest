@@ -17,10 +17,10 @@ import logging
 import time
 from typing import Dict, List, Optional
 
-import pandas as pd
 import requests
 
-from ..config import DATA_DIR, require
+from ._constituents import sp500_members
+from ..config import require
 
 logger = logging.getLogger("data_ingest.sec_common")
 
@@ -46,9 +46,8 @@ def normalize_ticker(ticker: str) -> str:
 
 
 def sp500_tickers() -> List[str]:
-    """The S&P 500 equities of data/tickers.csv (the ^ index symbols dropped)."""
-    tickers = pd.read_csv(DATA_DIR / "tickers.csv", header=None)[0].dropna().astype(str)
-    return [t for t in tickers if not t.startswith("^")]
+    """Today's members of the S&P 500."""
+    return sp500_members()
 
 
 class SecClient:
