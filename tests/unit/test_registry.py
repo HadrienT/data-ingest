@@ -13,6 +13,8 @@ def test_discovers_the_shipped_sources():
         "options-chain-snapshot", "dividend-yields", "intl-rates",
         "equity-universe", "intl-equity-prices", "ecb-fx",
         "rating-default-rates",
+        "equity-raw-prices", "equity-dividends", "equity-splits",
+        "sp500-membership", "french-factors",
     } <= names
 
 
@@ -24,6 +26,7 @@ def test_underscore_prefixed_modules_are_not_sources():
     assert "_yfinance_common" not in names
     assert "_intl_providers" not in names
     assert "_constituents" not in names
+    assert "_equity_raw_common" not in names
 
 
 def test_every_source_is_usable():

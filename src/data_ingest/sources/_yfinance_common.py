@@ -34,10 +34,14 @@ RETRY_BACKOFF_SECONDS = 1.5
 
 #: yfinance's capitalised names -- callers rename/select from these.
 RAW_FIELDS = ["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]
+#: What `actions=True` adds: the dividend and the split ratio of the day (0
+#: when there is none), and the close adjusted for both as of today.
+ACTION_FIELDS = ["Adj Close", "Dividends", "Stock Splits"]
 
 
-def download_daily_ohlcv(tickers: List[str], start: str, end: str) -> pd.DataFrame:
-    """Daily OHLCV for every ticker, columns named per RAW_FIELDS.
+def download_daily_ohlcv(tickers: List[str], start: str, end: str, actions: bool = False) -> pd.DataFrame:
+    """Daily OHLCV for every ticker, columns named per RAW_FIELDS, plus
+    ACTION_FIELDS when `actions` is set.
 
     Downloads in chunks of CHUNK_SIZE tickers (yfinance's multi-ticker request
     gets unreliable well beyond that), retrying each chunk on failure. One
@@ -47,7 +51,7 @@ def download_daily_ohlcv(tickers: List[str], start: str, end: str) -> pd.DataFra
     """
     frames = []
     for batch in _chunked(tickers, CHUNK_SIZE):
-        normalized = _normalize(_download_chunk(batch, start, end), batch)
+        normalized = _normalize(_download_chunk(batch, start, end, actions), batch, actions)
         if not normalized.empty:
             frames.append(normalized)
     if not frames:
@@ -67,7 +71,7 @@ def _chunked(items: Iterable[str], size: int) -> Iterable[List[str]]:
         yield batch
 
 
-def _download_chunk(tickers: List[str], start: str, end: str) -> pd.DataFrame:
+def _download_chunk(tickers: List[str], start: str, end: str, actions: bool = False) -> pd.DataFrame:
     last_error: Optional[Exception] = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -79,6 +83,7 @@ def _download_chunk(tickers: List[str], start: str, end: str) -> pd.DataFrame:
                 group_by="ticker",
                 threads=True,
                 auto_adjust=False,
+                actions=actions,
             )
             if not data.empty:
                 return data
@@ -91,7 +96,7 @@ def _download_chunk(tickers: List[str], start: str, end: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
-def _normalize(df: pd.DataFrame, tickers: List[str]) -> pd.DataFrame:
+def _normalize(df: pd.DataFrame, tickers: List[str], actions: bool = False) -> pd.DataFrame:
     if df.empty:
         return df
     if isinstance(df.columns, pd.MultiIndex):
@@ -100,14 +105,20 @@ def _normalize(df: pd.DataFrame, tickers: List[str]) -> pd.DataFrame:
         data = df.reset_index().copy()
         data["Ticker"] = tickers[0] if tickers else "UNKNOWN"
 
-    wanted = ["Date", "Ticker", "Open", "High", "Low", "Close", "Volume"]
+    wanted = RAW_FIELDS + ACTION_FIELDS if actions else RAW_FIELDS
     data = data[[c for c in wanted if c in data.columns]]
     data["Date"] = pd.to_datetime(data["Date"]).dt.date
-    for col in ("Open", "High", "Low", "Close", "Volume"):
-        if col in data.columns:
-            data[col] = pd.to_numeric(data[col], errors="coerce")
+    for col in data.columns.difference(["Date", "Ticker"]):
+        data[col] = pd.to_numeric(data[col], errors="coerce")
+    # A day is kept when it has a price, or an event: a dividend can be
+    # detached on a day the ticker did not trade.
     prices = [c for c in ("Open", "High", "Low", "Close") if c in data.columns]
-    data = data.dropna(subset=prices, how="all")
+    quoted = data[prices].notna().any(axis=1)
+    for col in ("Dividends", "Stock Splits"):
+        if col in data.columns:
+            data[col] = data[col].fillna(0.0)
+            quoted |= data[col] != 0
+    data = data[quoted].copy()
     if "Volume" in data.columns:
         data["Volume"] = data["Volume"].fillna(0).astype("int64")
     return data
