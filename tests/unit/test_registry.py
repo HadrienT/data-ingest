@@ -14,7 +14,7 @@ def test_discovers_the_shipped_sources():
         "equity-universe", "intl-equity-prices", "ecb-fx",
         "rating-default-rates",
         "equity-raw-prices", "equity-dividends", "equity-splits",
-        "sp500-membership", "french-factors",
+        "sp500-membership", "french-factors", "capture-catalogue",
     } <= names
 
 

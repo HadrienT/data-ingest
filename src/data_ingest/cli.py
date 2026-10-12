@@ -5,17 +5,22 @@
     ingest run sp500-prices --full    backfill the whole history
     ingest run --all                  every source, routine window
     ingest status                     what is stored, per source
+    ingest capture                    record the Bitstamp order book until stopped
+    ingest capture-verify FILE        replay a recorded day against the exchange's snapshots
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
+import signal
 import sys
 from datetime import date
+from pathlib import Path
 from typing import List, Optional
 
-from .config import LOG_LEVEL, dsn
+from .config import CAPTURE_DIR, LOG_LEVEL, dsn
 from .core.database import Database
 from .core.runner import routine_window, run_source
 from .core.source import Window
@@ -83,6 +88,32 @@ def cmd_status(_args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_capture(args: argparse.Namespace) -> int:
+    from .capture.service import run
+
+    async def until_stopped() -> None:
+        # `docker stop` sends SIGTERM: end like Ctrl-C does, closing the files.
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
+        await run(Path(args.dir), args.pair, args.check_interval)
+
+    try:
+        asyncio.run(until_stopped())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.info("Capture stopped")
+    return 0
+
+
+def cmd_capture_verify(args: argparse.Namespace) -> int:
+    from .capture.verify import format_report, verify
+
+    failed = False
+    for name in args.file:
+        report = verify(Path(name))
+        print(format_report(Path(name), report))
+        failed = failed or not report["ok"]
+    return 1 if failed else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ingest", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -100,6 +131,17 @@ def build_parser() -> argparse.ArgumentParser:
     run.set_defaults(func=cmd_run)
 
     sub.add_parser("status", help="show what is stored").set_defaults(func=cmd_status)
+
+    capture = sub.add_parser("capture", help="record an order book feed until stopped")
+    capture.add_argument("--pair", default="btcusd", help="Bitstamp market symbol (default: btcusd)")
+    capture.add_argument("--dir", default=str(CAPTURE_DIR), help="where the day files go (default: CAPTURE_DIR)")
+    capture.add_argument("--check-interval", type=float, default=600.0, metavar="SECONDS",
+                         help="time between two comparisons with the exchange's book (default: 600)")
+    capture.set_defaults(func=cmd_capture)
+
+    check = sub.add_parser("capture-verify", help="replay recorded day files and report their quality")
+    check.add_argument("file", nargs="+", help="event files (.qmev)")
+    check.set_defaults(func=cmd_capture_verify)
     return parser
 
 

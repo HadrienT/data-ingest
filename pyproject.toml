@@ -16,6 +16,7 @@ dependencies = [
     "fredapi",
     # intl-rates (ECB, BoE, SNB, BoJ, MoF: plain HTTP, no client library)
     "requests",
+    "websockets>=14",
 ]
 
 [project.optional-dependencies]

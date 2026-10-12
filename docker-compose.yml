@@ -5,6 +5,7 @@
 #   docker compose run --rm ingest run --all   one manual pass over every source
 #   docker compose up -d airflow-init           # once, then:
 #   docker compose up -d                        # the Airflow scheduler runs everything
+#   docker compose up -d capture               the order book recorder, always on
 #
 # Scheduling is Airflow's job (see airflow/dags/data_ingest_dags.py and the
 # README's Scheduling section); its UI is at http://127.0.0.1:8080. `ingest`
@@ -50,11 +51,14 @@ x-airflow-common:
     OPTIONS_CHAIN_TICKERS: ${OPTIONS_CHAIN_TICKERS:-}
     SEC_USER_AGENT: ${SEC_USER_AGENT:-}
     SEC_TICKERS: ${SEC_TICKERS:-}
+    CAPTURE_DIR: /data/capture
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/config:/opt/airflow/config
+    # What the `capture` service records, for the capture-catalogue source.
+    - ${CAPTURE_DIR:-./data/capture}:/data/capture:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -104,10 +108,41 @@ services:
       OPTIONS_CHAIN_TICKERS: ${OPTIONS_CHAIN_TICKERS:-}
       SEC_USER_AGENT: ${SEC_USER_AGENT:-}
       SEC_TICKERS: ${SEC_TICKERS:-}
+      CAPTURE_DIR: /data/capture
+    volumes:
+      - ${CAPTURE_DIR:-./data/capture}:/data/capture:ro
     # Runs to completion: for manual/ad-hoc runs only. The schedule itself is
     # Airflow's job now (airflow-scheduler below), not this container's.
     restart: "no"
     command: ["run", "--all"]
+
+  # --- Capture: the one service that is not a scheduled run. ---------------
+  # A connection to Bitstamp's public order book feed that stays open and
+  # writes one event file per day (src/data_ingest/capture/). It needs neither
+  # Postgres nor an account. Recreating it leaves a hole of a few seconds in
+  # the day's file, so it is only recreated when its image changes.
+  capture:
+    build: .
+    image: data-ingest:latest
+    restart: unless-stopped
+    # The host user, so that the files can be read and removed without sudo;
+    # the directory must exist and belong to it (scripts/deploy.sh sees to it).
+    user: "${CAPTURE_UID:-1000}:${CAPTURE_GID:-1000}"
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CAPTURE_DIR: /data/capture
+    volumes:
+      - ${CAPTURE_DIR:-./data/capture}:/data/capture
+    command: ["capture", "--pair", "${CAPTURE_PAIR:-btcusd}"]
+    # Stopping waits for a snapshot request in flight before closing the files.
+    stop_grace_period: 30s
+    healthcheck:
+      # The sidecar of the open day is rewritten every 15 seconds.
+      test: ["CMD-SHELL", "find /data/capture -name '*.json' -mmin -2 | grep -q ."]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # --- Airflow: the scheduler. See airflow/dags/data_ingest_dags.py. -------
 

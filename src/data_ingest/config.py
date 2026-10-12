@@ -16,6 +16,10 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 #: Files shipped with a source (ticker lists and the like).
 DATA_DIR = Path(__file__).parent / "sources" / "data"
 
+#: Where the capture service writes its event files, and where the catalogue
+#: reads them from.
+CAPTURE_DIR = Path(os.getenv("CAPTURE_DIR", "data/capture"))
+
 
 def dsn() -> str:
     """libpq connection string built from the PG* environment variables."""
