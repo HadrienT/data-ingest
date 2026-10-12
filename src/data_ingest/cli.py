@@ -5,7 +5,7 @@
     ingest run sp500-prices --full    backfill the whole history
     ingest run --all                  every source, routine window
     ingest status                     what is stored, per source
-    ingest capture                    record the Bitstamp order book until stopped
+    ingest capture                    record Bitstamp order books until stopped
     ingest capture-verify FILE        replay a recorded day against the exchange's snapshots
 """
 
@@ -20,7 +20,7 @@ from datetime import date
 from pathlib import Path
 from typing import List, Optional
 
-from .config import CAPTURE_DIR, LOG_LEVEL, dsn
+from .config import CAPTURE_DIR, CAPTURE_MAX_GB, LOG_LEVEL, dsn
 from .core.database import Database
 from .core.runner import routine_window, run_source
 from .core.source import Window
@@ -94,7 +94,8 @@ def cmd_capture(args: argparse.Namespace) -> int:
     async def until_stopped() -> None:
         # `docker stop` sends SIGTERM: end like Ctrl-C does, closing the files.
         asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, asyncio.current_task().cancel)
-        await run(Path(args.dir), args.pair, args.check_interval)
+        pairs = [pair for pair in args.pair.split(",") if pair]
+        await run(Path(args.dir), pairs, args.check_interval, int(args.max_gb * 1e9))
 
     try:
         asyncio.run(until_stopped())
@@ -133,14 +134,18 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="show what is stored").set_defaults(func=cmd_status)
 
     capture = sub.add_parser("capture", help="record an order book feed until stopped")
-    capture.add_argument("--pair", default="btcusd", help="Bitstamp market symbol (default: btcusd)")
+    capture.add_argument("--pair", default="btcusd", metavar="PAIR[,PAIR...]",
+                         help="Bitstamp market symbols, comma-separated (default: btcusd)")
     capture.add_argument("--dir", default=str(CAPTURE_DIR), help="where the day files go (default: CAPTURE_DIR)")
     capture.add_argument("--check-interval", type=float, default=600.0, metavar="SECONDS",
                          help="time between two comparisons with the exchange's book (default: 600)")
+    capture.add_argument("--max-gb", type=float, default=CAPTURE_MAX_GB, metavar="GB",
+                         help="size of the directory above which the oldest days are removed; "
+                              "0 keeps everything (default: CAPTURE_MAX_GB)")
     capture.set_defaults(func=cmd_capture)
 
     check = sub.add_parser("capture-verify", help="replay recorded day files and report their quality")
-    check.add_argument("file", nargs="+", help="event files (.qmev)")
+    check.add_argument("file", nargs="+", help="event files (.qmev or .qmev.xz)")
     check.set_defaults(func=cmd_capture_verify)
     return parser
 

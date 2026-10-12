@@ -117,10 +117,12 @@ services:
     command: ["run", "--all"]
 
   # --- Capture: the one service that is not a scheduled run. ---------------
-  # A connection to Bitstamp's public order book feed that stays open and
-  # writes one event file per day (src/data_ingest/capture/). It needs neither
-  # Postgres nor an account. Recreating it leaves a hole of a few seconds in
-  # the day's file, so it is only recreated when its image changes.
+  # Connections to Bitstamp's public order book feed that stay open and write
+  # one event file per pair and per day (src/data_ingest/capture/). It needs
+  # neither Postgres nor an account. It also compresses the days that are
+  # over and removes the oldest ones above CAPTURE_MAX_GB. Recreating it
+  # leaves a hole of a few seconds in the day's files, so it is only recreated
+  # when its image changes.
   capture:
     build: .
     image: data-ingest:latest
@@ -131,14 +133,16 @@ services:
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CAPTURE_DIR: /data/capture
+      CAPTURE_PAIRS: ${CAPTURE_PAIRS:-btcusd,nearusd}
+      CAPTURE_MAX_GB: ${CAPTURE_MAX_GB:-40}
     volumes:
       - ${CAPTURE_DIR:-./data/capture}:/data/capture
-    command: ["capture", "--pair", "${CAPTURE_PAIR:-btcusd}"]
+    command: ["capture", "--pair", "${CAPTURE_PAIRS:-btcusd,nearusd}"]
     # Stopping waits for a snapshot request in flight before closing the files.
     stop_grace_period: 30s
     healthcheck:
-      # The sidecar of the open day is rewritten every 15 seconds.
-      test: ["CMD-SHELL", "find /data/capture -name '*.json' -mmin -2 | grep -q ."]
+      # The sidecar of each pair's open day is rewritten every 15 seconds.
+      test: ["CMD-SHELL", "[ $$(find /data/capture -name '*.json' -mmin -2 | wc -l) -ge $$(echo $$CAPTURE_PAIRS | tr , ' ' | wc -w) ]"]
       interval: 60s
       timeout: 10s
       retries: 3

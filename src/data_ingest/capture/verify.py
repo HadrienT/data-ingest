@@ -1,8 +1,8 @@
 """Replays a day file and checks it against what the exchange published.
 
-    ingest capture-verify <root>/bitstamp/btcusd/btcusd-2026-10-12.qmev
+    ingest capture-verify <root>/bitstamp/btcusd/btcusd-2026-10-12.qmev.xz
 
-The file is read the way `quant-microstructure` will read it: every event is
+The file, compressed or not, is read the way `quant-microstructure` will read it: every event is
 applied to a strict order-by-order book. The report says
 
 - whether every event was valid for that book (an Add of an id already
@@ -24,10 +24,10 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from .book import Book
-from .events import HEADER, MAGIC, RECORD, VERSION, EventType, Side
+from .events import RECORD, EventType, Side
+from .files import CHECKPOINTS, record_chunks, stem_of, with_suffix
 
 MILLISECOND = 1_000_000
-_CHUNK = RECORD.size * 65536
 
 
 def read_checkpoints(path: Path) -> List[Tuple[int, Dict[int, Tuple[int, int, int]]]]:
@@ -45,7 +45,7 @@ def read_checkpoints(path: Path) -> List[Tuple[int, Dict[int, Tuple[int, int, in
 
 def verify(path: Path) -> dict:
     """The report of one day file. Raises ValueError if it is not one."""
-    checkpoints = read_checkpoints(path.with_name(path.stem + ".checkpoints.gz"))
+    checkpoints = read_checkpoints(with_suffix(stem_of(path), CHECKPOINTS))
     book = Book()
     types: Counter = Counter()
     report = {"events": 0, "invalid_events": 0, "gaps": 0, "missing": 0, "out_of_order": 0, "crossed": 0,
@@ -71,59 +71,50 @@ def verify(path: Path) -> dict:
     last_seq = None
     last_ts = None
     add, cancel, trade, clear = EventType.ADD, EventType.CANCEL, EventType.TRADE, EventType.CLEAR
-    with open(path, "rb") as stream:
-        header = stream.read(HEADER.size)
-        if len(header) != HEADER.size or HEADER.unpack(header) != (MAGIC, VERSION):
-            raise ValueError(f"{path}: not a version {VERSION} event file")
-        while True:
-            chunk = stream.read(_CHUNK)
-            if not chunk:
+    for chunk in record_chunks(path):
+        for ts, _ts_recv, seq, order_id, price, qty, kind, side in RECORD.iter_unpack(chunk):
+            if last_seq is None:
+                report["first_ts"] = ts
+                # A snapshot from before the file belongs to the previous day's.
+                while index < len(checkpoints) and checkpoints[index][0] * 1000 < ts:
+                    compared["outside_file"] += 1
+                    index += 1
+            elif seq != last_seq + 1:
+                if seq > last_seq:
+                    report["gaps"] += 1
+                    report["missing"] += seq - last_seq - 1
+                else:
+                    report["out_of_order"] += 1
+            last_seq = seq
+            if last_ts is not None and ts < last_ts:
+                report["time_regressions"] += 1
+            last_ts = ts
+
+            while index < len(checkpoints):
+                start = checkpoints[index][0] // 1000 * MILLISECOND
+                if before is None and ts >= start:
+                    before = dict(book.orders)
+                if before is not None and ts >= start + MILLISECOND:
+                    conclude()
+                    continue
                 break
-            if len(chunk) % RECORD.size:
-                raise ValueError(f"{path}: truncated record")
-            for ts, _ts_recv, seq, order_id, price, qty, kind, side in RECORD.iter_unpack(chunk):
-                if last_seq is None:
-                    report["first_ts"] = ts
-                    # A snapshot from before the file belongs to the previous day's.
-                    while index < len(checkpoints) and checkpoints[index][0] * 1000 < ts:
-                        compared["outside_file"] += 1
-                        index += 1
-                elif seq != last_seq + 1:
-                    if seq > last_seq:
-                        report["gaps"] += 1
-                        report["missing"] += seq - last_seq - 1
-                    else:
-                        report["out_of_order"] += 1
-                last_seq = seq
-                if last_ts is not None and ts < last_ts:
-                    report["time_regressions"] += 1
-                last_ts = ts
+            if before is not None:
+                touched.add(order_id)
 
-                while index < len(checkpoints):
-                    start = checkpoints[index][0] // 1000 * MILLISECOND
-                    if before is None and ts >= start:
-                        before = dict(book.orders)
-                    if before is not None and ts >= start + MILLISECOND:
-                        conclude()
-                        continue
-                    break
-                if before is not None:
-                    touched.add(order_id)
-
-                types[kind] += 1
-                try:
-                    if kind == add:
-                        book.add(order_id, Side(side), price, qty)
-                        if book.crossed():
-                            report["crossed"] += 1
-                    elif kind == cancel or kind == trade:
-                        book.reduce(order_id, qty)
-                    elif kind == clear:
-                        book.clear()
-                    else:
-                        raise ValueError("not an event of an order-by-order stream")
-                except ValueError:
-                    report["invalid_events"] += 1
+            types[kind] += 1
+            try:
+                if kind == add:
+                    book.add(order_id, Side(side), price, qty)
+                    if book.crossed():
+                        report["crossed"] += 1
+                elif kind == cancel or kind == trade:
+                    book.reduce(order_id, qty)
+                elif kind == clear:
+                    book.clear()
+                else:
+                    raise ValueError("not an event of an order-by-order stream")
+            except ValueError:
+                report["invalid_events"] += 1
     # No event after these snapshots: the book they describe is the last one.
     while last_seq is not None and index < len(checkpoints):
         if before is None:

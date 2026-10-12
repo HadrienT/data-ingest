@@ -1,5 +1,6 @@
 """The order book capture: the event format, the reading of Bitstamp's
-messages, the recorder and the verification of a day file.
+messages, the recorder, the verification of a day file, what keeps the files
+from filling the disk and the bars computed from them.
 
 The message sequences are the ones Bitstamp sent on BTC/USD on 11 October 2026
 (ids shortened, fields trimmed to the ones read). The `network` test at the
@@ -7,17 +8,22 @@ bottom records the live feed for half a minute."""
 
 import asyncio
 import json
-from datetime import date
+import lzma
+from datetime import date, datetime, timezone
 
 import pytest
 
+from data_ingest.capture.bars import COLUMNS, minute_bars
 from data_ingest.capture.bitstamp import Instrument, Normaliser, Snapshot, to_int
 from data_ingest.capture.book import Book
 from data_ingest.capture.events import Event, EventType, Side, read_events, write_header
+from data_ingest.capture.files import events_file, stem_of
+from data_ingest.capture.housekeeping import tidy
 from data_ingest.capture.service import SECOND, Recorder, run
 from data_ingest.capture.verify import verify
 from data_ingest.capture.writer import DayWriter
 from data_ingest.sources.capture_catalogue import CaptureCatalogue, scan
+from data_ingest.sources.microstructure_bars import MicrostructureBars
 
 BTCUSD = Instrument("bitstamp", "btcusd", price_decimals=2, qty_decimals=8)
 #: 2026-10-11 21:35:45 UTC, in microseconds.
@@ -431,7 +437,7 @@ def test_verify_refuses_a_file_that_is_not_an_event_file(tmp_path):
 def test_the_catalogue_describes_each_day_file_from_its_sidecar(tmp_path):
     recorder = recording(tmp_path, Feed())
     recorder.close()
-    rows = scan(tmp_path, since=None)
+    rows = scan(tmp_path)
     assert len(rows) == 1
     row = dict(zip(CaptureCatalogue.table.column_names, rows[0]))
     assert (row["venue"], row["pair"], row["date"], row["kind"]) == ("bitstamp", "btcusd", date(2026, 10, 11), "l3")
@@ -440,7 +446,6 @@ def test_the_catalogue_describes_each_day_file_from_its_sidecar(tmp_path):
     assert (row["events"], row["bytes"], row["gaps"], row["defects"]) == (4, 8 + 4 * 50, 0, 0)
     assert row["first_ts_recv"].isoformat().startswith("2026-10-11T21:35:46")
     assert row["closed"] is False
-    assert scan(tmp_path, since=date(2026, 10, 12)) == []
 
 
 def test_the_catalogue_source_reads_the_capture_directory(tmp_path, monkeypatch):
@@ -457,6 +462,208 @@ def test_the_catalogue_source_reads_the_capture_directory(tmp_path, monkeypatch)
     assert CaptureCatalogue().fetch(Window.everything()).empty
 
 
+# ── compression and retention ────────────────────────────────────────────────
+
+
+def catalogue(tmp_path):
+    return [dict(zip(CaptureCatalogue.table.column_names, row)) for row in scan(tmp_path)]
+
+
+def test_a_day_that_is_over_is_compressed_and_reads_the_same(tmp_path):
+    recorder = recording(tmp_path, Feed(), check_interval=1.0)
+    bids = (("83400.00", "1.00000000", "11"), ("83405.00", "0.30000000", "20"))
+    recorder.on_snapshot(snapshot(at=T0 + 2_000_000, bids=bids), ts_recv=T0 * 1000 + 3 * SECOND)
+    recorder.close()
+    path = recorder.writer.path
+    raw, report = path.read_bytes(), verify(path)
+    assert report["checkpoints"]["matched"] == 1
+
+    assert tidy(tmp_path, today=date(2026, 10, 12)) == {"compressed": 1, "removed": 0}
+    packed = events_file(stem_of(path))
+    assert not path.exists() and packed.name == "btcusd-2026-10-11.qmev.xz"
+    # `xz -d` gives back the file quant-microstructure reads.
+    assert lzma.decompress(packed.read_bytes()) == raw
+    assert verify(packed) == report
+
+    (row,) = catalogue(tmp_path)
+    assert row["path"] == "bitstamp/btcusd/btcusd-2026-10-11.qmev.xz" and row["bytes"] == packed.stat().st_size
+    # The service stopped before midnight and never closed the day itself.
+    assert row["closed"] is True and row["events"] == 4
+    assert tidy(tmp_path, today=date(2026, 10, 12)) == {"compressed": 0, "removed": 0}
+
+
+def test_the_day_being_recorded_is_never_compressed(tmp_path):
+    recorder = recording(tmp_path, Feed())
+    recorder.close()
+    nothing = {"compressed": 0, "removed": 0}
+    assert tidy(tmp_path, today=date(2026, 10, 11), max_bytes=1) == nothing
+    # After a night without the feed, the recorder still holds yesterday's file.
+    assert tidy(tmp_path, today=date(2026, 10, 12), busy={recorder.writer.path}, max_bytes=1) == nothing
+    assert recorder.writer.path.exists()
+
+
+def test_the_oldest_days_go_when_the_recordings_outgrow_their_budget(tmp_path):
+    for day in (9, 10, 11):
+        writer = DayWriter(tmp_path, BTCUSD, date(2026, 10, day))
+        writer.write([Event(1, 1, 0, 0, 0, 0, EventType.CLEAR, Side.BUY),
+                      Event(2, 2, 0, 11, 8340000, 100, EventType.ADD, Side.BUY)])
+        writer.checkpoint(snapshot())
+        writer.close(closed=True)
+    today = date(2026, 10, 11)
+    assert tidy(tmp_path, today) == {"compressed": 2, "removed": 0}
+    weight = sum(path.stat().st_size for path in tmp_path.rglob("*") if path.is_file())
+
+    assert tidy(tmp_path, today, max_bytes=weight) == {"compressed": 0, "removed": 0}
+    assert tidy(tmp_path, today, max_bytes=weight - 1) == {"compressed": 0, "removed": 1}
+    names = sorted(path.name for path in tmp_path.rglob("*") if path.is_file())
+    # The events and the checkpoints of the 9th are gone, its sidecar stays.
+    assert names == ["btcusd-2026-10-09.json",
+                     "btcusd-2026-10-10.checkpoints.gz", "btcusd-2026-10-10.json", "btcusd-2026-10-10.qmev.xz",
+                     "btcusd-2026-10-11.checkpoints.gz", "btcusd-2026-10-11.json", "btcusd-2026-10-11.qmev"]
+    oldest = catalogue(tmp_path)[0]
+    assert (oldest["date"], oldest["path"], oldest["bytes"]) == (date(2026, 10, 9), None, None)
+    assert oldest["events"] == 2 and oldest["closed"] is True
+
+    # However small the budget, the day being recorded stays.
+    assert tidy(tmp_path, today, max_bytes=1) == {"compressed": 0, "removed": 1}
+    assert events_file(stem_of(writer.path)) == writer.path
+
+
+# ── bars ─────────────────────────────────────────────────────────────────────
+
+#: 2026-10-11 21:36:00 UTC, in nanoseconds: the start of a minute.
+M0 = (T0 + 15_000_000) * 1000
+
+
+def day_with_two_minutes(tmp_path):
+    """A book of 1.00 / 1.04, an order that narrows the spread for twenty
+    seconds, one trade a minute, and a hole in the second minute."""
+    def at(seconds, order_id, price, qty, kind, side, recv=None):
+        ts = M0 + seconds * SECOND
+        return Event(ts, ts + 7 if recv is None else recv, 0, order_id, price, qty, kind, side)
+
+    writer = DayWriter(tmp_path, BTCUSD, date(2026, 10, 11))
+    writer.write([
+        at(1, 0, 0, 0, EventType.CLEAR, Side.BUY, recv=1),
+        at(1, 11, 100, 10, EventType.ADD, Side.BUY, recv=1),
+        at(1, 12, 104, 10, EventType.ADD, Side.SELL, recv=1),
+        at(31, 13, 102, 5, EventType.ADD, Side.BUY),
+        at(41, 12, 104, 4, EventType.TRADE, Side.BUY),
+        at(51, 13, 102, 5, EventType.CANCEL, Side.BUY),
+        at(70, 11, 100, 2, EventType.TRADE, Side.SELL),
+    ])
+    writer.gap()
+    writer.write([
+        at(90, 0, 0, 0, EventType.CLEAR, Side.BUY, recv=2),
+        at(90, 21, 99, 1, EventType.ADD, Side.BUY, recv=2),
+        at(90, 22, 101, 1, EventType.ADD, Side.SELL, recv=2),
+    ])
+    writer.close()
+    return writer.path
+
+
+def test_a_bar_holds_the_trades_the_top_of_book_and_the_spread_of_its_minute(tmp_path):
+    path = day_with_two_minutes(tmp_path)
+    first, second = (dict(zip(COLUMNS, bar)) for bar in minute_bars(path, price_decimals=2, qty_decimals=8))
+
+    assert first["ts"] == datetime(2026, 10, 11, 21, 36, tzinfo=timezone.utc)
+    assert (first["open"], first["high"], first["low"], first["close"]) == pytest.approx((1.04, 1.04, 1.04, 1.04))
+    # A buyer lifted the offer: all of the volume is bought.
+    assert (first["volume"], first["buy_volume"], first["sell_volume"]) == pytest.approx((4e-8, 4e-8, 0))
+    assert (first["trades"], first["vwap"]) == (1, pytest.approx(1.04))
+    assert (first["bid"], first["ask"]) == pytest.approx((1.00, 1.04))
+    # 4 ticks for 30 s, 2 for 20 s, 4 again for the last 9 s: known from second 1.
+    assert first["quoted_seconds"] == pytest.approx(59)
+    assert first["spread_mean"] == pytest.approx((4 * 30 + 2 * 20 + 4 * 9) / 59 * 0.01)
+    # The two orders of the first book are not orders that arrived.
+    assert (first["adds"], first["cancels"], first["gaps"]) == (1, 1, 0)
+
+    assert second["ts"] == datetime(2026, 10, 11, 21, 37, tzinfo=timezone.utc)
+    assert (second["open"], second["close"], second["sell_volume"]) == pytest.approx((1.00, 1.00, 2e-8))
+    # From the trade to the fresh book the feed had a hole: no spread there.
+    assert (second["gaps"], second["quoted_seconds"]) == (1, pytest.approx(10))
+    assert second["spread_mean"] == pytest.approx(0.04)
+    assert (second["bid"], second["ask"], second["adds"]) == (pytest.approx(0.99), pytest.approx(1.01), 0)
+
+
+def test_bars_read_a_day_being_written_and_a_compressed_one(tmp_path):
+    path = day_with_two_minutes(tmp_path)
+    whole = minute_bars(path, 2, 8)
+    with open(path, "ab") as out:
+        out.write(b"\x00" * 17)  # a record the capture has only half flushed
+    assert minute_bars(path, 2, 8) == whole
+    with pytest.raises(ValueError, match="truncated"):
+        verify(path)
+
+    path.write_bytes(path.read_bytes()[:-17])
+    tidy(tmp_path, today=date(2026, 10, 12))
+    assert minute_bars(events_file(stem_of(path)), 2, 8) == whole
+
+
+def test_a_minute_without_a_trade_has_a_bar_without_prices(tmp_path):
+    recorder = recording(tmp_path, Feed())
+    recorder.close()
+    (bar,) = (dict(zip(COLUMNS, bar)) for bar in minute_bars(recorder.writer.path, 2, 8))
+    assert bar["open"] is None and bar["vwap"] is None and (bar["volume"], bar["trades"]) == (0, 0)
+    assert (bar["bid"], bar["ask"], bar["adds"]) == (pytest.approx(83405.0), pytest.approx(83410.0), 1)
+
+
+def test_the_bars_source_replays_the_days_of_its_window(tmp_path, monkeypatch):
+    from data_ingest.core.source import Window
+    from data_ingest.sources import microstructure_bars
+
+    path = day_with_two_minutes(tmp_path)
+    (tmp_path / "bitstamp" / "btcusd" / "broken.json").write_text("{")
+    monkeypatch.setattr(microstructure_bars, "CAPTURE_DIR", tmp_path)
+    source = MicrostructureBars()
+    frame = source.fetch(Window.everything())
+    assert list(frame.columns) == source.table.column_names and len(frame) == 2
+    assert frame.iloc[0][["venue", "pair", "date"]].tolist() == ["bitstamp", "btcusd", date(2026, 10, 11)]
+    assert frame.iloc[0]["trades"] == 1 and frame.iloc[1]["gaps"] == 1
+
+    assert len(source.fetch(Window(start=date(2026, 10, 11), end=date(2026, 10, 12)))) == 2
+    assert source.fetch(Window(start=date(2026, 10, 12), end=date(2026, 10, 12))).empty
+    # A day whose events were removed keeps the bars it already has: nothing to replay.
+    path.unlink()
+    assert source.fetch(Window.everything()).empty
+
+
+def test_a_minute_is_never_in_the_bars_of_two_days(tmp_path, monkeypatch):
+    from data_ingest.core.source import Window
+    from data_ingest.sources import microstructure_bars
+
+    feed = Feed()
+    recorder = recording(tmp_path, feed)
+    midnight = T0 + 3 * 3600 * 1_000_000  # 00:35:45 UTC, the next day
+    recorder.on_message(feed.message("deleted", 20, BUY, "83405.00", "0.30000000", at=midnight), midnight * 1000 + 30)
+    recorder.close()
+    # The file of the 12th starts with the book as the 11th left it, at 21:35.
+    assert [bar[0].day for bar in minute_bars(recorder.writer.path, 2, 8)] == [11, 12]
+
+    monkeypatch.setattr(microstructure_bars, "CAPTURE_DIR", tmp_path)
+    frame = MicrostructureBars().fetch(Window.everything())
+    assert [(row.date.day, row.ts.day, row.ts.hour, row.cancels) for row in frame.itertuples()] == [
+        (11, 11, 21, 0), (12, 12, 0, 1)]
+
+
+# ── the command line ─────────────────────────────────────────────────────────
+
+
+def test_the_command_records_every_pair_it_is_given(tmp_path, monkeypatch):
+    from data_ingest import cli
+    from data_ingest.capture import service
+
+    seen = {}
+
+    async def fake_run(root, pairs, check_interval, max_bytes):
+        seen.update(root=root, pairs=pairs, check_interval=check_interval, max_bytes=max_bytes)
+
+    monkeypatch.setattr(service, "run", fake_run)
+    assert cli.main(["capture", "--pair", "btcusd,nearusd", "--dir", str(tmp_path), "--max-gb", "1.5"]) == 0
+    assert seen == {"root": tmp_path, "pairs": ["btcusd", "nearusd"], "check_interval": 600.0,
+                    "max_bytes": 1_500_000_000}
+
+
 # ── live ─────────────────────────────────────────────────────────────────────
 
 
@@ -465,7 +672,7 @@ def test_live_feed_replays_to_the_book_the_exchange_publishes(tmp_path):
     async def record():
         try:
             async with asyncio.timeout(35):
-                await run(tmp_path, "btcusd", check_interval=8.0)
+                await run(tmp_path, ["btcusd", "nearusd"], check_interval=8.0)
         except TimeoutError:
             pass
 
@@ -476,3 +683,7 @@ def test_live_feed_replays_to_the_book_the_exchange_publishes(tmp_path):
     assert report["checkpoints"]["matched"] >= 1 and report["checkpoints"]["failed"] == 0
     sidecar = json.loads(path.with_suffix(".json").read_text())
     assert not sidecar["quality"].get("unknown_order") and not sidecar["quality"].get("duplicate_order")
+    # The second pair is recorded by the same service, in its own files.
+    (other,) = tmp_path.glob("bitstamp/nearusd/*.qmev")
+    report = verify(other)
+    assert report["events"] > 300 and report["invalid_events"] == 0 and report["checkpoints"]["failed"] == 0

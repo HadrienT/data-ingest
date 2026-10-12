@@ -1,8 +1,5 @@
-"""One event file per pair and per UTC day, and what goes with it.
-
-    <root>/bitstamp/btcusd/btcusd-2026-10-12.qmev            the events
-    <root>/bitstamp/btcusd/btcusd-2026-10-12.json            the sidecar
-    <root>/bitstamp/btcusd/btcusd-2026-10-12.checkpoints.gz  the exchange's snapshots
+"""One event file per pair and per UTC day, and what goes with it (the
+names are in `files.py`).
 
 The event file is the source of truth (`quant-microstructure`, ADR-015). Each
 one starts with a Clear and the whole book, so a day replays on its own, and
@@ -29,11 +26,7 @@ from typing import Iterable, Optional
 
 from .bitstamp import Instrument, Snapshot
 from .events import HEADER, RECORD, Event, write_header
-
-
-def day_stem(root: Path, instrument: Instrument, day: date) -> Path:
-    """Path of a day's files, without the extension."""
-    return root / instrument.venue / instrument.pair / f"{instrument.pair}-{day.isoformat()}"
+from .files import CHECKPOINTS, EVENTS, SIDECAR, day_stem, with_suffix
 
 
 class DayWriter:
@@ -44,11 +37,11 @@ class DayWriter:
     def __init__(self, root: Path, instrument: Instrument, day: date):
         self.instrument = instrument
         self.day = day
-        stem = day_stem(root, instrument, day)
+        stem = day_stem(root, instrument.venue, instrument.pair, day)
         stem.parent.mkdir(parents=True, exist_ok=True)
-        self.path = stem.with_name(stem.name + ".qmev")
-        self.sidecar_path = stem.with_name(stem.name + ".json")
-        self.checkpoints_path = stem.with_name(stem.name + ".checkpoints.gz")
+        self.path = with_suffix(stem, EVENTS)
+        self.sidecar_path = with_suffix(stem, SIDECAR)
+        self.checkpoints_path = with_suffix(stem, CHECKPOINTS)
 
         #: How the day went: holes, reconnections, defects, checkpoints.
         self.quality: Counter = Counter()

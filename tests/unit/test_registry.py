@@ -15,6 +15,7 @@ def test_discovers_the_shipped_sources():
         "rating-default-rates",
         "equity-raw-prices", "equity-dividends", "equity-splits",
         "sp500-membership", "french-factors", "capture-catalogue",
+        "microstructure-bars",
     } <= names
 
 
