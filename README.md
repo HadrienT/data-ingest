@@ -304,9 +304,10 @@ long-running service of this repository (the `capture` service of
 `quant-microstructure`, replays a whole day in order, which a file does
 without a query (its ADR-015).
 
-**Two pairs** are recorded, `CAPTURE_PAIRS` in `.env`: BTC/USD and NEAR/USD,
-chosen on what the feed showed on 12 October 2026 (twenty minutes of BTC/USD,
-seven of NEAR/USD), for being the two ends of what Bitstamp offers:
+**One pair** is recorded, BTC/USD. The service takes several
+(`CAPTURE_PAIRS` in `.env`, comma-separated, each in its own files), and a
+second one was looked for on 12 October 2026, to have one pair whose spread is
+pinned to the tick and one whose tick is no constraint:
 
 | | BTC/USD | NEAR/USD |
 |---|---|---|
@@ -317,17 +318,16 @@ seven of NEAR/USD), for being the two ends of what Bitstamp offers:
 | events a second | 135 | 14 |
 | trades a minute | 26 | 0.1 |
 
-On BTC/USD the spread is pinned to the tick and orders queue at the best
-price: the place in the queue is what matters. On NEAR/USD the tick is no
-constraint, orders compete on price and each stands alone at its level; it
-trades little, its book is what there is to study. The other large pairs
-(ETH, SOL, XRP, DOGE) are of the first kind, at one tick 70 to 90 % of the
-time.
+BTC/USD is the first kind: orders queue at the best price and the place in
+the queue is what matters. So are the other large pairs (ETH, SOL, XRP, DOGE),
+at one tick 70 to 90 % of the time. The pairs of the second kind, like
+NEAR/USD, hardly trade: a book without trades is not worth recording yet. To
+be added the day a study needs it; what was not recorded cannot be had later.
 
 XRP/USD was tried and put aside: in twenty minutes its recorded book differed
 once from the exchange's (one order, by its quantity), and messages about
 orders the recorder did not know were counted, which did not happen on the
-five other pairs tried. Something in its messages is not read correctly yet.
+six other pairs tried. Something in its messages is not read correctly yet.
 
 ```
 data/capture/bitstamp/btcusd/btcusd-2026-10-12.qmev            the events, while the day is open
@@ -368,7 +368,7 @@ in the sidecar. Both clocks are kept on every event; Bitstamp's is cut to the
 millisecond.
 
 ```bash
-ingest capture --pair btcusd,nearusd               # record until stopped
+ingest capture                                    # record BTC/USD until stopped
 ingest capture-verify data/capture/bitstamp/btcusd/btcusd-2026-10-11.qmev.xz
 ```
 
@@ -396,8 +396,8 @@ does not serve the history of its orders.
 
 **Volume**, extrapolated from those minutes of a Monday morning: 11.7 million
 events and 0.58 GB a day for BTC/USD while the day is open, 0.13 GB once
-compressed, plus 16 MB of checkpoints; a tenth of that for NEAR/USD. About
-0.17 GB a day in all, so the default budget holds some 240 days. A full day
+compressed, plus 16 MB of checkpoints. About 0.15 GB a day in all, so the
+default budget holds some 270 days. A full day
 has not been measured yet, and a busy one will weigh several times more: the
 catalogue below measures every day from now on (`events`, `bytes`), and the
 budget is to be set again on a measured week.
