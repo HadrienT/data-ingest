@@ -1,11 +1,12 @@
 """The capture service: a connection that stays open, unlike every source of
 this repository, which are scheduled runs.
 
-    ingest capture                 record Bitstamp BTC/USD until stopped
+    ingest capture --pair btcusd,nearusd    record these pairs until stopped
 
-`Recorder` is the logic, without any network: it is given messages and
-snapshots and writes events. `run` is the shell around it, which holds the
-WebSocket, asks for snapshots and reconnects.
+`Recorder` is the logic of one pair, without any network: it is given messages
+and snapshots and writes events. `run` is the shell around the recorders: for
+each pair it holds a WebSocket, asks for snapshots and reconnects, and now and
+then it compresses the days that are over and makes room (`housekeeping.py`).
 
 A recording starts, and restarts after every hole, the same way: messages are
 buffered, a snapshot of the whole book is fetched, the book is loaded from it
@@ -31,11 +32,12 @@ import time
 from collections import deque
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Callable, Deque, List, Optional, Tuple
+from typing import Callable, Deque, List, Optional, Sequence, Tuple
 
 import requests
 
 from .bitstamp import ORDER_EVENTS, REST_URL, WS_URL, Instrument, Normaliser, Snapshot, message_time_us
+from .housekeeping import tidy
 from .writer import DayWriter
 
 logger = logging.getLogger("data_ingest.capture")
@@ -50,9 +52,11 @@ SNAPSHOT_SPACING = 2 * SECOND
 #: Orders touched over this long are remembered, to compare a snapshot with a
 #: book that has moved on since. Older snapshots are not compared.
 RECENT = 30 * SECOND
-#: BTC/USD sends over a hundred messages a second: this long without one is a
-#: dead connection.
+#: The pairs recorded send several messages a second at their quietest: this
+#: long without one is a dead connection.
 SILENCE = 30 * SECOND
+#: Time between two rounds of housekeeping, in seconds.
+TIDY_EVERY = 600.0
 FLUSH_EVERY = 1 * SECOND
 SAVE_EVERY = 15 * SECOND
 
@@ -273,26 +277,51 @@ async def _session(recorder: Recorder, connect: Callable, snapshot: Callable) ->
                 pending.cancel()
 
 
-async def run(root: Path, pair: str = "btcusd", check_interval: float = 600.0) -> None:
-    """Records until cancelled."""
+async def _record(recorder: Recorder, connect: Callable) -> None:
+    """One pair, reconnecting until cancelled."""
+    wait = 1.0
+    while True:
+        started = time.monotonic()
+        try:
+            await _session(recorder, connect, fetch_snapshot)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("%s: connection lost (%s), reconnecting in %.0f s", recorder.instrument.pair, exc, wait)
+        # Back off while it keeps failing at once; start over after a session that held.
+        wait = 1.0 if time.monotonic() - started > 60 else min(wait * 2, 60.0)
+        await asyncio.sleep(wait)
+
+
+async def _housekeep(root: Path, recorders: Sequence[Recorder], max_bytes: int) -> None:
+    """Compresses the days that are over and keeps the directory within its
+    budget, in a thread: compressing a day takes minutes, the feed does not
+    wait."""
+    while True:
+        busy = {recorder.writer.path for recorder in recorders}
+        try:
+            await asyncio.to_thread(tidy, root, utc_day(time.time_ns()), busy, max_bytes)
+        except Exception:
+            logger.exception("Housekeeping failed, the recording goes on")
+        await asyncio.sleep(TIDY_EVERY)
+
+
+async def run(root: Path, pairs: Sequence[str] = ("btcusd",), check_interval: float = 600.0,
+              max_bytes: int = 0) -> None:
+    """Records until cancelled. `max_bytes` is the budget of the whole
+    directory (0: nothing is ever removed)."""
     from websockets.asyncio.client import connect
 
-    instrument = await asyncio.to_thread(fetch_instrument, pair)
-    recorder = Recorder(root, instrument, time.time_ns(), check_interval)
-    logger.info("Capturing %s %s into %s (tick %s, lot %s)", instrument.venue, pair, recorder.writer.path.parent,
-                instrument.tick_size, instrument.lot_size)
-    wait = 1.0
+    recorders: List[Recorder] = []
     try:
-        while True:
-            started = time.monotonic()
-            try:
-                await _session(recorder, connect, fetch_snapshot)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning("Connection lost (%s), reconnecting in %.0f s", exc, wait)
-            # Back off while it keeps failing at once; start over after a session that held.
-            wait = 1.0 if time.monotonic() - started > 60 else min(wait * 2, 60.0)
-            await asyncio.sleep(wait)
+        for pair in pairs:
+            instrument = await asyncio.to_thread(fetch_instrument, pair)
+            recorder = Recorder(root, instrument, time.time_ns(), check_interval)
+            recorders.append(recorder)
+            logger.info("Capturing %s %s into %s (tick %s, lot %s)", instrument.venue, pair,
+                        recorder.writer.path.parent, instrument.tick_size, instrument.lot_size)
+        await asyncio.gather(*(_record(recorder, connect) for recorder in recorders),
+                             _housekeep(root, recorders, max_bytes))
     finally:
-        recorder.close()
+        for recorder in recorders:
+            recorder.close()

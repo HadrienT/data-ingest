@@ -1,5 +1,5 @@
-"""The catalogue of what the capture service recorded: one row per event file,
-with its time range, its size and how the day went.
+"""The catalogue of what the capture service recorded: one row per pair and
+per day, with its time range, its size and how the day went.
 
 The files are the source of truth and the database only describes them
 (`quant-microstructure`, ADR-015): this source reads the sidecar the capture
@@ -11,7 +11,15 @@ the database is down; this run catches up afterwards.
 and sizes: a price of 8340709 with two decimals is 83407.09. `gaps` is the
 number of holes in the numbering of the file, each followed by a Clear and a
 fresh book; `checkpoints_failed` the number of times the recorded book was
-not the one the exchange published. `path` is relative to `CAPTURE_DIR`.
+not the one the exchange published.
+
+`path` is relative to `CAPTURE_DIR` and names the events as they are now: a
+plain file while the day is open, a compressed one afterwards (`bytes` is the
+size of that file, `events` times 50 plus 8 the size once decompressed), and
+NULL once the day was removed to make room. Its row stays, like the bars
+computed from it. Every sidecar is read at every run: what changes a row
+(compression, removal) does not touch the sidecar, and there is one small file
+per pair and per day.
 """
 
 from __future__ import annotations
@@ -24,6 +32,7 @@ from typing import List, Optional
 
 import pandas as pd
 
+from ..capture.files import EVENTS, events_file, stem_of
 from ..config import CAPTURE_DIR
 from ..core.source import Source, Window
 from ..core.spec import Column, TableSpec, WriteMode
@@ -37,19 +46,20 @@ def _time(nanoseconds: Optional[int]) -> Optional[datetime]:
     return datetime.fromtimestamp(nanoseconds / 1e9, tz=timezone.utc)
 
 
-def catalogue_row(sidecar: dict, events_path: Path, root: Path) -> tuple:
-    """One row of the table from one sidecar."""
+def catalogue_row(sidecar: dict, events_path: Optional[Path], root: Path) -> tuple:
+    """One row of the table from one sidecar and the events it describes
+    (None when they were removed)."""
     quality = sidecar.get("quality", {})
     count = quality.get("latency_count", 0)
     return (
         sidecar["venue"],
         sidecar["pair"],
         date.fromisoformat(sidecar["day"]),
-        str(events_path.relative_to(root)),
+        str(events_path.relative_to(root)) if events_path else None,
         sidecar["kind"],
         sidecar["price_decimals"],
         sidecar["qty_decimals"],
-        events_path.stat().st_size if events_path.exists() else None,
+        events_path.stat().st_size if events_path else None,
         sidecar["events"],
         _time(sidecar.get("first_ts_recv")),
         _time(sidecar.get("last_ts_recv")),
@@ -62,20 +72,19 @@ def catalogue_row(sidecar: dict, events_path: Path, root: Path) -> tuple:
         quality.get("unknown_order", 0) + quality.get("duplicate_order", 0) + quality.get("empty_order", 0),
         quality["latency_ns_sum"] / count / 1e6 if count else None,
         quality["latency_ns_max"] / 1e6 if count else None,
-        bool(sidecar.get("closed")),
+        # A day left open by a crash was closed by whoever compressed or removed it.
+        bool(sidecar.get("closed")) or events_path is None or not events_path.name.endswith(EVENTS),
     )
 
 
-def scan(root: Path, since: Optional[date]) -> List[tuple]:
+def scan(root: Path) -> List[tuple]:
     rows = []
     for path in sorted(root.glob("*/*/*.json")):
         try:
             sidecar = json.loads(path.read_text())
-            if since is not None and date.fromisoformat(sidecar["day"]) < since:
-                continue
-            rows.append(catalogue_row(sidecar, path.with_suffix(".qmev"), root))
+            rows.append(catalogue_row(sidecar, events_file(stem_of(path)), root))
         except (OSError, ValueError, KeyError) as exc:
-            # Read while the capture was replacing it, or not a sidecar.
+            # Read while the capture was replacing or compressing it, or not a sidecar.
             logger.warning("Skipping %s: %s", path, exc)
     return rows
 
@@ -85,8 +94,6 @@ class CaptureCatalogue(Source):
     description = "Catalogue of the recorded order book files: time range, size, holes, checks"
     write_mode = WriteMode.UPSERT
     schedule = "*/15 * * * *"
-    # The open day changes at every run; closed days only if a file is replaced.
-    lookback_days = 3
 
     table = TableSpec(
         schema="microstructure",
@@ -95,7 +102,7 @@ class CaptureCatalogue(Source):
             Column("venue", "TEXT", nullable=False),
             Column("pair", "TEXT", nullable=False),
             Column("date", "DATE", nullable=False),
-            Column("path", "TEXT", nullable=False),
+            Column("path", "TEXT"),
             Column("kind", "TEXT", nullable=False),
             Column("price_decimals", "INTEGER", nullable=False),
             Column("qty_decimals", "INTEGER", nullable=False),
@@ -119,7 +126,6 @@ class CaptureCatalogue(Source):
     )
 
     def fetch(self, window: Window) -> pd.DataFrame:
-        since = None if window.full else window.start
         # dtype=object: None stays None (not NaN or NaT) and integers stay
         # integers, which is what COPY needs for the nullable columns.
-        return pd.DataFrame(scan(CAPTURE_DIR, since), columns=self.table.column_names, dtype=object)
+        return pd.DataFrame(scan(CAPTURE_DIR), columns=self.table.column_names, dtype=object)

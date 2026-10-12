@@ -20,6 +20,10 @@ DATA_DIR = Path(__file__).parent / "sources" / "data"
 #: reads them from.
 CAPTURE_DIR = Path(os.getenv("CAPTURE_DIR", "data/capture"))
 
+#: What the whole of it may weigh, in gigabytes, before the oldest days are
+#: removed. 0 keeps everything.
+CAPTURE_MAX_GB = float(os.getenv("CAPTURE_MAX_GB") or 0)
+
 
 def dsn() -> str:
     """libpq connection string built from the PG* environment variables."""
