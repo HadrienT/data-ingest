@@ -171,6 +171,7 @@ with DAG(
     schedule="0 5 * * *",
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     catchup=False,
+    max_active_runs=1,  # two runs at once would both see no issue, and both open one
     default_args={"retries": 2, "retry_delay": timedelta(minutes=5), "execution_timeout": timedelta(minutes=15)},
     tags=["atlas"],
 ):
