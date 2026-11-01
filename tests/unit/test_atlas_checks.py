@@ -3,6 +3,7 @@
 import importlib.util
 import sys
 import types
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,22 @@ def test_known_gaps_stay_quiet_until_they_close(checks):
     probe = {"component": "c", "id": "p", "actual": "x"}
     assert checks.drift_body([{**probe, "status": "known"}, {**probe, "status": "ok"}]) is None
     assert "cleared" in checks.drift_body([{**probe, "status": "cleared"}])
+
+
+def test_token_warning_starts_two_weeks_before_expiry(checks):
+    expiry = "2026-12-01 10:00:00 UTC"
+    assert checks.expiry_body(None, datetime(2026, 11, 1, tzinfo=UTC)) is None
+    assert checks.expiry_body(expiry, datetime(2026, 11, 1, tzinfo=UTC)) is None
+    assert "2026-12-01" in checks.expiry_body(expiry, datetime(2026, 11, 20, tzinfo=UTC))
+
+
+def test_a_failed_task_keeps_one_issue(checks, monkeypatch):
+    fake = FakeHub(checks)
+    monkeypatch.setattr(checks, "github", lambda: fake.hub)
+    context = {"task_instance": types.SimpleNamespace(task_id="detect_changes"), "exception": RuntimeError("boom")}
+    checks.report_failure(context)
+    checks.report_failure(context)
+    assert len(fake.issues) == 1 and "boom" in fake.issues[0]["body"]
 
 
 class FakeHub:

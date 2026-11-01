@@ -21,7 +21,7 @@ import json
 import re
 import subprocess
 import tempfile
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pendulum
@@ -33,6 +33,7 @@ API = "https://api.github.com"
 TIMEOUT_S = 30
 API_FILE_LIMIT = 300
 PROBE_TIMEOUT_S = 120
+TOKEN_WARNING_DAYS = 14
 
 
 def matches(glob: str, path: str) -> bool:
@@ -85,14 +86,26 @@ def drift_body(results: list[dict]) -> str | None:
     return "\n".join(lines)
 
 
+def expiry_body(expiry: str | None, now: datetime) -> str | None:
+    """The issue text when the token is about to expire. GitHub sends the date with each answer."""
+    if expiry is None:
+        return None
+    date = datetime.strptime(expiry, "%Y-%m-%d %H:%M:%S %Z").replace(tzinfo=UTC)
+    if date - now > timedelta(days=TOKEN_WARNING_DAYS):
+        return None
+    return f"The `github_atlas` token expires on {date.date()}. Once it does, this issue cannot update and `detect_changes` fails. Replace it in Airflow."
+
+
 class GitHub:
     def __init__(self, token: str):
         self.session = requests.Session()
+        self.token_expiry: str | None = None
         self.session.headers.update({"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
 
     def call(self, method: str, path: str, **kwargs):
         response = self.session.request(method, f"{API}/{path}", timeout=TIMEOUT_S, **kwargs)
         response.raise_for_status()
+        self.token_expiry = response.headers.get("github-authentication-token-expiration", self.token_expiry)
         return response
 
     def documented_repos(self) -> list[str]:
@@ -144,6 +157,12 @@ def github() -> GitHub:
     return GitHub(BaseHook.get_connection("github_atlas").password)
 
 
+def report_failure(context: dict) -> None:
+    """A failed task keeps an issue, so nobody has to open Airflow to learn about it. It closes on the next success."""
+    name = context["task_instance"].task_id
+    github().sync(f"failure:{name}", f"The nightly check {name} failed", f"`{name}` failed: `{str(context.get('exception'))[:300]}`")
+
+
 def run_probes() -> list[dict]:
     """The host's forced command ignores what is sent: the key can only run the probes."""
     connection = BaseHook.get_connection("atlas_probe_ssh")
@@ -172,7 +191,12 @@ with DAG(
     start_date=pendulum.datetime(2025, 1, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,  # two runs at once would both see no issue, and both open one
-    default_args={"retries": 2, "retry_delay": timedelta(minutes=5), "execution_timeout": timedelta(minutes=15)},
+    default_args={
+        "retries": 2,
+        "retry_delay": timedelta(minutes=5),
+        "execution_timeout": timedelta(minutes=15),
+        "on_failure_callback": report_failure,
+    },
     tags=["atlas"],
 ):
 
@@ -189,6 +213,8 @@ with DAG(
             hub.sync(f"review:{repo}", f"Review the {repo} page", review_body(report))
         if failed:
             raise RuntimeError("; ".join(failed))
+        hub.sync("token", "The Atlas GitHub token expires soon", expiry_body(hub.token_expiry, datetime.now(UTC)))
+        hub.sync("failure:detect_changes", "", None)
 
     @task
     def check_live_state() -> None:
@@ -200,6 +226,7 @@ with DAG(
         errors = [f"{r['repo']}/{r['id']}: {r['actual']}" for r in results if r["status"] == "error"]
         if errors:
             raise RuntimeError("; ".join(errors))
+        hub.sync("failure:check_live_state", "", None)
 
     detect_changes()
     check_live_state()
