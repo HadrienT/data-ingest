@@ -2,6 +2,8 @@
 
 Scheduled ingestion of financial and economic data into a self-hosted Postgres.
 
+**[How it works: interactive map](https://hadrient.github.io/atlas-pages/data-ingest/)**
+
 [![CI](https://github.com/HadrienT/data-ingest/actions/workflows/ci.yml/badge.svg)](https://github.com/HadrienT/data-ingest/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
