@@ -31,6 +31,23 @@ back, over the source's lookback. For a source that declares `catch_up_on`
 (the daily price sources), that run starts at the last date stored instead
 when it is older: a two-week outage is fetched whole, not left as a hole.
 
+### Jobs for other projects
+
+Two DAGs schedule work that belongs to other repositories and import nothing from
+`data_ingest`; they live here because this is where Airflow reads its DAGs.
+
+- `atlas_checks` (daily): checks the Atlas pages against their repositories and the
+  host's live state.
+- `kbase_regulation_refresh` (first day of the month, 00:00 UTC): refreshes the
+  regulation collection of AgenticEnv's knowledge base (fetches the regulators' texts
+  again, re-ingests what changed, evaluates; WP21 in AgenticEnv). The work needs the
+  host's GPU and AgenticEnv's checkout, so the task only opens an SSH session whose key
+  is restricted to one forced command, `infra/scripts/kbase-regulation-refresh.sh`. The
+  key, its `authorized_keys` line and the connection `kbase_refresh_ssh` come from
+  AgenticEnv's `infra/scripts/install-refresh-access.sh`. No retry: a failed run is
+  looked at, not repeated (the script retries each request itself). The summary is in
+  the task log and on AgenticEnv#71.
+
 ## Deployment
 
 **Updating is automatic**: merging into `main` deploys. Every two minutes a
