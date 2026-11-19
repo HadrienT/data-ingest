@@ -56,6 +56,7 @@ data changes in different ways.
 | `upsert` | A key has one truth; a later fetch replaces an earlier one | A close that gets corrected |
 | `versioned` | Values are revised, and earlier vintages are kept | Macro series |
 | `append` | Immutable events, never restated | |
+| `snapshot` | A group of rows is captured whole; a later fetch replaces the group | An option chain, one ticker on one day |
 
 `versioned` is what makes a backtest honest. An unemployment rate published in
 January is routinely restated in February, and overwriting it destroys the

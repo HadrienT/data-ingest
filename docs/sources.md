@@ -9,7 +9,7 @@ consumer needs to know about each one.
 | `commodity-prices` | `prices.commodity_daily` | upsert | `30 23 * * 1-5` |
 | `fred-macro` | `macro.fred_series` | versioned | `0 23 * * 1-5` |
 | `fx-rates` | `fx.daily_rates` | upsert | `0 23 * * 1-5` |
-| `options-chain-snapshot` | `options.chain_snapshot` | upsert | `30 22 * * 1-5` |
+| `options-chain-snapshot` | `options.chain_snapshot` | snapshot | `30 22 * * 1-5` |
 | `dividend-yields` | `prices.dividend_yields` | upsert | `0 22 * * 1-5` |
 | `intl-rates` | `macro.intl_rates` | upsert | `30 21 * * 1-5` |
 | `equity-universe` | `prices.equity_universe` | upsert | `0 6 * * 1` |
@@ -52,6 +52,51 @@ rather than asking yfinance, which no longer has them. Its ticker universe is
 a small fixed list of liquid, options-heavy names (broad ETFs and mega-caps),
 not the full `sp500-prices` universe — see the source file for why — and is
 overridable with `OPTIONS_CHAIN_TICKERS`.
+
+Each stored (ticker, date) is **exactly one fetch**: a run's rows for a ticker
+replace everything stored for that ticker on that day, in one transaction, so
+a same-day re-run never mixes its quotes with an earlier run's. The cost is
+accepted on purpose: when Yahoo fails on some expiries, the stored chain lacks
+them (the run logs `snapshot is partial`) rather than filling the gap with
+older quotes. A ticker the run returns nothing for keeps its earlier snapshot.
+
+Next to the chain, `options.chain_snapshot_loads` is its load registry, so a
+consumer can tell whether a snapshot changed by reading one indexed row
+instead of the whole chain:
+
+| Column | Type | |
+|---|---|---|
+| `ticker` | TEXT | primary key |
+| `date` | DATE | primary key, the snapshot's `date` |
+| `loaded_at` | TIMESTAMPTZ | time of the transaction that last wrote this (ticker, date) |
+| `row_count` | INTEGER | rows of this (ticker, date) in `options.chain_snapshot` |
+| `checksum` | TEXT | md5 of those rows, see below |
+
+Guarantees to consumers:
+
+- **One row per stored (ticker, date)**: every snapshot in
+  `options.chain_snapshot` has its registry row, including those stored
+  before the registry existed (filled when it was created).
+- **Same transaction as the chain**: a write that touches a (ticker, date)
+  updates its registry row before committing, so a reader never sees a new
+  registry row with old quotes or the reverse. A failed write rolls back both.
+- **Computed from the stored rows** by Postgres, not from what the run
+  fetched: `row_count` and `checksum` describe exactly what a reader gets.
+- `loaded_at` moves on every write of the (ticker, date), even an identical
+  one; `checksum` changes only when the stored rows do. Compare checksums to
+  detect a change.
+
+The checksum is reproducible from the table, with `extra_float_digits = 1`
+(the Postgres default) and `DateStyle = 'ISO, MDY'`:
+
+```sql
+SELECT md5(string_agg(
+         ROW(expiry, option_type, strike, bid, ask, last_price,
+             volume, open_interest, implied_volatility)::text,
+         '|' ORDER BY expiry, option_type COLLATE "C", strike))
+FROM options.chain_snapshot
+WHERE ticker = 'SPY' AND date = '2026-11-18';
+```
 
 `dividend-yields` tracks the exact same universe (imported from
 `options_chain.py`, not a second list) because it exists to serve the same

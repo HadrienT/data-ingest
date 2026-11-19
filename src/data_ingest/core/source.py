@@ -5,11 +5,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import pandas as pd
 
 from .spec import TableSpec, WriteMode
+
+if TYPE_CHECKING:
+    import psycopg
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,22 @@ class Source(ABC):
 
         Returning an empty DataFrame is a normal outcome (a holiday, nothing
         published yet) and must not raise.
+        """
+
+    def ensure_companions(self, conn: "psycopg.Connection") -> None:
+        """Create the tables this source maintains next to its own.
+
+        Runs in the same transaction as the creation of `table`, on every run.
+        Most sources have none.
+        """
+
+    def after_write(self, cur: "psycopg.Cursor", frame: pd.DataFrame) -> None:
+        """Runs on the write's cursor, after the rows are inserted and before
+        the commit, with the frame that was written.
+
+        For state that must never disagree with the table, such as a registry
+        of what was loaded: it commits or rolls back with the rows. Most
+        sources need nothing here.
         """
 
     def default_window(self) -> Window:

@@ -46,4 +46,15 @@ def test_nullable_columns_excludes_not_null():
 
 def test_write_modes_are_stable_strings():
     # Persisted in docs and systemd units; renaming one is a breaking change.
-    assert [m.value for m in WriteMode] == ["upsert", "versioned", "append"]
+    assert [m.value for m in WriteMode] == ["upsert", "versioned", "append", "snapshot"]
+
+
+def test_snapshot_key_must_be_part_of_the_primary_key():
+    with pytest.raises(ValueError, match="snapshot key column 'close'"):
+        TableSpec(
+            schema="s",
+            name="t",
+            columns=(Column("date", "DATE"), Column("close", "DOUBLE PRECISION")),
+            primary_key=("date",),
+            snapshot_key=("close",),
+        )

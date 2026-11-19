@@ -26,11 +26,18 @@ class WriteMode(str, Enum):
     by when they were observed.
 
     APPEND suits immutable events, where nothing is ever restated.
+
+    SNAPSHOT suits data captured as a whole at one moment, such as an option
+    chain: the rows a fetch returns for a group (the table's `snapshot_key`,
+    e.g. one ticker on one day) *replace* every stored row of that group. An
+    upsert would keep the rows a re-run no longer lists, mixing two fetches in
+    what reads as one photo. A group the frame does not touch is left alone.
     """
 
     UPSERT = "upsert"
     VERSIONED = "versioned"
     APPEND = "append"
+    SNAPSHOT = "snapshot"
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,9 @@ class TableSpec:
     columns: Sequence[Column]
     primary_key: Sequence[str]
     indexes: Sequence[Sequence[str]] = field(default_factory=tuple)
+    #: For WriteMode.SNAPSHOT: the primary-key columns that identify one
+    #: snapshot, whose stored rows a write replaces as a whole.
+    snapshot_key: Sequence[str] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         names = [c.name for c in self.columns]
@@ -68,6 +78,9 @@ class TableSpec:
             for col in index:
                 if col not in names:
                     raise ValueError(f"{self.qualified}: index column {col!r} is not declared")
+        for col in self.snapshot_key:
+            if col not in self.primary_key:
+                raise ValueError(f"{self.qualified}: snapshot key column {col!r} is not in the primary key")
         if not self.primary_key:
             raise ValueError(f"{self.qualified}: a primary key is required")
 
