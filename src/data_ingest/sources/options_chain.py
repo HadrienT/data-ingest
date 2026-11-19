@@ -24,13 +24,20 @@ has 15-20), so scaling this to hundreds of tickers multiplies out to
 thousands of requests a day against an unofficial, rate-limited endpoint.
 Start small and prove it holds up before widening the list.
 
+Write mode: snapshot. A run's rows for one ticker replace every row stored
+for that ticker on that day, so each stored (ticker, date) is exactly one
+fetch. When yfinance returns a partial chain (some expiries failing), the
+partial chain is what gets stored: a faithful picture of a degraded upstream
+is preferred to quotes from an earlier fetch passing as current ones. A
+ticker the run returns nothing for keeps its earlier snapshot whole.
+
 Load registry: next to the chain, `<schema>.chain_snapshot_loads` holds one
 row per stored (ticker, date) -- when it was last written, how many rows it
 has and a checksum of them -- updated in the same transaction as the chain.
 A consumer reads that one row to know whether a snapshot changed instead of
 re-reading thousands of quotes. Both figures are computed by Postgres from
-the stored rows, not from the frame: an upsert leaves in place the contracts a
-re-run no longer lists, and the checksum has to describe them too.
+the stored rows rather than from the frame, so they describe what a reader
+gets whatever the write mode.
 """
 
 from __future__ import annotations
@@ -91,7 +98,7 @@ _CHECKSUM_COLUMNS = (
 class OptionsChainSnapshot(Source):
     name = "options-chain-snapshot"
     description = "Daily snapshot of the full option chain, US equities (yfinance)"
-    write_mode = WriteMode.UPSERT
+    write_mode = WriteMode.SNAPSHOT
     # After the US close (16:00 New York), same reasoning as sp500-prices'
     # 22:00 Paris slot: close enough behind the close without chasing DST.
     schedule = "30 22 * * 1-5"
@@ -117,6 +124,7 @@ class OptionsChainSnapshot(Source):
         # The common downstream query is "one ticker's whole surface on one
         # day"; the primary key already serves "everything on one day".
         indexes=(("ticker", "date"),),
+        snapshot_key=("ticker", "date"),
     )
 
     # ------------------------------------------------------------ registry
@@ -230,6 +238,7 @@ def _fetch_one_chain(ticker: str, snapshot_date: date) -> pd.DataFrame:
 
     tick = yf.Ticker(ticker)
     sides = []
+    failed = 0
     for exp_str in expirations:
         try:
             expiry = datetime.strptime(exp_str, "%Y-%m-%d").date()
@@ -242,10 +251,18 @@ def _fetch_one_chain(ticker: str, snapshot_date: date) -> pd.DataFrame:
             chain = tick.option_chain(exp_str)
         except Exception as exc:
             logger.warning("options-chain: failed to fetch %s %s: %s", ticker, exp_str, exc)
+            failed += 1
             continue
 
         sides.append(_normalize_side(chain.calls, "call", ticker, expiry, snapshot_date))
         sides.append(_normalize_side(chain.puts, "put", ticker, expiry, snapshot_date))
+
+    if failed:
+        # The snapshot mode stores this chain as it is, without the missing
+        # expiries: say so once, where the run's log will show it.
+        logger.warning(
+            "options-chain: %s snapshot is partial, %d of %d expiries failed", ticker, failed, len(expirations)
+        )
 
     sides = [s for s in sides if not s.empty]
     if not sides:

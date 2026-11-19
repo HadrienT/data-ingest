@@ -152,6 +152,13 @@ class Database:
         else:
             conflict = sql.SQL("ON CONFLICT DO NOTHING")
 
+        if mode is WriteMode.SNAPSHOT:
+            if not spec.snapshot_key:
+                raise ValueError(f"{spec.qualified}: the snapshot write mode needs a snapshot_key")
+            # Every stored row of a touched snapshot was just deleted, so a
+            # conflict can only be a duplicate inside the frame: let it raise.
+            conflict = sql.SQL("")
+
         with self.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -161,6 +168,9 @@ class Database:
                     for row in frame[names].itertuples(index=False, name=None):
                         copy.write_row(row)
 
+                if mode is WriteMode.SNAPSHOT:
+                    cur.execute(self._snapshot_delete(spec, target))
+                    replaced = cur.rowcount
                 if mode is WriteMode.VERSIONED:
                     statement = self._versioned_insert(spec, target, names, col_sql)
                 else:
@@ -172,8 +182,22 @@ class Database:
                 if after_write is not None:
                     after_write(cur, frame)
 
-        logger.info("%s: %s rows sent, %s written", spec.qualified, len(frame), written)
+        if mode is WriteMode.SNAPSHOT:
+            logger.info("%s: %s rows replaced by %s", spec.qualified, replaced, written)
+        else:
+            logger.info("%s: %s rows sent, %s written", spec.qualified, len(frame), written)
         return written
+
+    def _snapshot_delete(self, spec: TableSpec, target: sql.Composed) -> sql.Composed:
+        """Deletes every stored row of the snapshots the staged frame touches,
+        so the insert that follows replaces each of them as a whole."""
+        key = sql.SQL(", ").join(sql.Identifier(c) for c in spec.snapshot_key)
+        match = sql.SQL(" AND ").join(
+            sql.SQL("t.{c} = s.{c}").format(c=sql.Identifier(c)) for c in spec.snapshot_key
+        )
+        return sql.SQL("DELETE FROM {target} t USING (SELECT DISTINCT {key} FROM staging) s WHERE {match}").format(
+            target=target, key=key, match=match
+        )
 
     def _versioned_insert(self, spec: TableSpec, target: sql.Composed, names: list[str], col_sql: sql.Composed) -> sql.Composed:
         """Insert only the rows whose values differ from the stored vintage.

@@ -2,6 +2,7 @@ from datetime import date
 
 import pandas as pd
 
+from data_ingest.core.spec import WriteMode
 from data_ingest.sources.options_chain import (
     DEFAULT_TICKERS,
     OptionsChainSnapshot,
@@ -73,3 +74,9 @@ def test_tickers_defaults_to_the_fixed_liquid_universe(monkeypatch):
 def test_tickers_honours_the_env_override(monkeypatch):
     monkeypatch.setenv("OPTIONS_CHAIN_TICKERS", "aapl, msft ,, nvda")
     assert OptionsChainSnapshot().tickers() == ["AAPL", "MSFT", "NVDA"]
+
+
+def test_each_ticker_and_day_is_stored_as_one_snapshot():
+    """A re-run replaces a ticker's chain of the day rather than mixing in it."""
+    assert OptionsChainSnapshot.write_mode is WriteMode.SNAPSHOT
+    assert tuple(OptionsChainSnapshot.table.snapshot_key) == ("ticker", "date")

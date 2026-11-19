@@ -106,12 +106,22 @@ def test_a_changed_quote_changes_the_checksum(db, source):
     assert _registry(db)[("SPY", DAY)][2] != before[2]
 
 
-def test_the_registry_describes_the_stored_rows_not_the_frame(db, source):
-    """An upsert keeps the contracts a re-run no longer lists."""
+def test_a_rerun_replaces_the_snapshot_and_the_registry_follows(db, source):
+    """A contract the re-run no longer lists leaves the snapshot."""
     _load(db, source, _quotes(strikes=(500.0, 510.0)))
     _load(db, source, _quotes(strikes=(500.0,)))
 
-    assert _registry(db)[("SPY", DAY)][1] == 4
+    assert _chain_rows(db) == 2
+    assert _registry(db)[("SPY", DAY)][1] == 2
+
+
+def test_a_ticker_missing_from_the_rerun_keeps_its_snapshot(db, source):
+    _load(db, source, pd.concat([_quotes("SPY"), _quotes("QQQ")]))
+    qqq = _registry(db)[("QQQ", DAY)]
+    _load(db, source, _quotes("SPY", bid=1.5))
+
+    assert _registry(db)[("QQQ", DAY)] == qqq
+    assert _chain_rows(db) == 8
 
 
 def test_a_load_leaves_other_snapshots_alone(db, source):

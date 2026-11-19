@@ -4,6 +4,7 @@ Skipped when no database is reachable, so the unit suite stays runnable
 anywhere. Locally: docker compose up -d postgres && pytest tests/integration
 """
 
+import dataclasses
 import datetime
 
 import pandas as pd
@@ -12,7 +13,7 @@ import pytest
 
 from data_ingest.config import dsn
 from data_ingest.core.database import OBSERVED_AT, Database
-from data_ingest.core.spec import WriteMode
+from data_ingest.core.spec import Column, WriteMode
 
 pytestmark = pytest.mark.postgres
 
@@ -101,6 +102,64 @@ def test_rejects_a_frame_missing_a_column(db, prices, price_rows):
 
 def test_empty_frame_writes_nothing(db, prices):
     assert db.write(prices, pd.DataFrame(), WriteMode.UPSERT) == 0
+
+
+# ----------------------------------------------------------------- snapshot
+
+@pytest.fixture
+def snapshots(db, price_spec):
+    spec = dataclasses.replace(price_spec, primary_key=("date", "ticker", "venue"), snapshot_key=("date",),
+                               columns=(*price_spec.columns, Column("venue", "TEXT", nullable=False)))
+    db.ensure_table(spec, WriteMode.SNAPSHOT)
+    yield spec
+    with db.connect() as conn:
+        conn.execute(f'DROP SCHEMA IF EXISTS "{spec.schema}" CASCADE')
+
+
+def _venues(day, *venues, close=1.0):
+    return pd.DataFrame({
+        "date": [day] * len(venues), "ticker": ["AAPL"] * len(venues),
+        "close": [close] * len(venues), "volume": [1] * len(venues), "venue": list(venues),
+    })
+
+
+def _stored(db, spec):
+    with db.connect() as conn:
+        return conn.execute(
+            f'SELECT date, venue, close FROM "{spec.schema}"."{spec.name}" ORDER BY date, venue'
+        ).fetchall()
+
+
+def test_snapshot_replaces_every_row_of_a_touched_snapshot(db, snapshots):
+    day = datetime.date(2025, 2, 7)
+    db.write(snapshots, _venues(day, "A", "B"), WriteMode.SNAPSHOT)
+    written = db.write(snapshots, _venues(day, "A", close=2.0), WriteMode.SNAPSHOT)
+
+    assert written == 1
+    assert _stored(db, snapshots) == [(day, "A", pytest.approx(2.0))]
+
+
+def test_snapshot_leaves_untouched_snapshots_alone(db, snapshots):
+    day, next_day = datetime.date(2025, 2, 7), datetime.date(2025, 2, 10)
+    db.write(snapshots, _venues(day, "A", "B"), WriteMode.SNAPSHOT)
+    db.write(snapshots, _venues(next_day, "A"), WriteMode.SNAPSHOT)
+
+    assert [(r[0], r[1]) for r in _stored(db, snapshots)] == [(day, "A"), (day, "B"), (next_day, "A")]
+
+
+def test_snapshot_rejects_a_frame_with_duplicate_keys(db, snapshots):
+    """The old rows are gone, so a conflict is a duplicate in the frame: a bug."""
+    day = datetime.date(2025, 2, 7)
+    db.write(snapshots, _venues(day, "A"), WriteMode.SNAPSHOT)
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        db.write(snapshots, _venues(day, "B", "B"), WriteMode.SNAPSHOT)
+
+    assert _stored(db, snapshots) == [(day, "A", pytest.approx(1.0))]
+
+
+def test_snapshot_needs_a_snapshot_key(db, prices, price_rows):
+    with pytest.raises(ValueError, match="needs a snapshot_key"):
+        db.write(prices, price_rows, WriteMode.SNAPSHOT)
 
 
 # ---------------------------------------------------------------- versioned
