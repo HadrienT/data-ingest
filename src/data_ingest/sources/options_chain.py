@@ -23,6 +23,14 @@ expirations plus one more per expiration (a liquid single-stock name easily
 has 15-20), so scaling this to hundreds of tickers multiplies out to
 thousands of requests a day against an unofficial, rate-limited endpoint.
 Start small and prove it holds up before widening the list.
+
+Load registry: next to the chain, `<schema>.chain_snapshot_loads` holds one
+row per stored (ticker, date) -- when it was last written, how many rows it
+has and a checksum of them -- updated in the same transaction as the chain.
+A consumer reads that one row to know whether a snapshot changed instead of
+re-reading thousands of quotes. Both figures are computed by Postgres from
+the stored rows, not from the frame: an upsert leaves in place the contracts a
+re-run no longer lists, and the checksum has to describe them too.
 """
 
 from __future__ import annotations
@@ -35,7 +43,9 @@ from typing import List, Optional
 
 import numpy as np
 import pandas as pd
+import psycopg
 import yfinance as yf
+from psycopg import sql
 
 from ..core.source import Source, Window
 from ..core.spec import Column, TableSpec, WriteMode
@@ -64,6 +74,18 @@ _RAW_TO_STORED = {
     "openInterest": "open_interest",
     "impliedVolatility": "implied_volatility",
 }
+
+#: Name of the load registry, in the chain's schema.
+REGISTRY_TABLE = "chain_snapshot_loads"
+
+#: The text whose md5 is the registry's checksum: every stored row of one
+#: (ticker, date) as a Postgres row literal of these columns, joined by "|" in
+#: primary-key order. Part of the contract in docs/sources.md: changing it
+#: changes every checksum.
+_CHECKSUM_COLUMNS = (
+    "expiry", "option_type", "strike", "bid", "ask", "last_price",
+    "volume", "open_interest", "implied_volatility",
+)
 
 
 class OptionsChainSnapshot(Source):
@@ -96,6 +118,73 @@ class OptionsChainSnapshot(Source):
         # day"; the primary key already serves "everything on one day".
         indexes=(("ticker", "date"),),
     )
+
+    # ------------------------------------------------------------ registry
+
+    def _registry(self) -> sql.Composed:
+        return sql.SQL("{}.{}").format(sql.Identifier(self.table.schema), sql.Identifier(REGISTRY_TABLE))
+
+    def ensure_companions(self, conn: psycopg.Connection) -> None:
+        """Creates the load registry and, when it is new, fills it for every
+        snapshot already stored, so it holds one row per stored (ticker, date)
+        from the moment it exists."""
+        qualified = f"{self.table.schema}.{REGISTRY_TABLE}"
+        existed = conn.execute("SELECT to_regclass(%s)", (qualified,)).fetchone()[0] is not None
+        conn.execute(
+            sql.SQL(
+                "CREATE TABLE IF NOT EXISTS {} (\n"
+                "    ticker TEXT NOT NULL,\n"
+                "    date DATE NOT NULL,\n"
+                "    loaded_at TIMESTAMPTZ NOT NULL,\n"
+                "    row_count INTEGER NOT NULL,\n"
+                "    checksum TEXT NOT NULL,\n"
+                "    PRIMARY KEY (ticker, date)\n"
+                ")"
+            ).format(self._registry())
+        )
+        if not existed:
+            with conn.cursor() as cur:
+                self._record_loads(cur, None)
+                logger.info("%s created and backfilled: %s snapshots", qualified, cur.rowcount)
+
+    def after_write(self, cur: psycopg.Cursor, frame: pd.DataFrame) -> None:
+        pairs = frame[["ticker", "date"]].drop_duplicates()
+        self._record_loads(cur, (list(pairs["ticker"]), list(pairs["date"])))
+
+    def _record_loads(self, cur: psycopg.Cursor, pairs: Optional[tuple]) -> None:
+        """Upserts the registry rows of `pairs` (tickers, dates), or of every
+        stored snapshot when None, from the rows the chain holds now."""
+        # The checksum hashes the text of the rows, so pin the two settings
+        # that change it: the float output precision and the date format.
+        cur.execute("SET LOCAL extra_float_digits = 1")
+        cur.execute("SET LOCAL DateStyle = 'ISO, MDY'")
+
+        chain = sql.SQL("{}.{}").format(sql.Identifier(self.table.schema), sql.Identifier(self.table.name))
+        row = sql.SQL("ROW({})::text").format(
+            sql.SQL(", ").join(sql.SQL("c.{}").format(sql.Identifier(n)) for n in _CHECKSUM_COLUMNS)
+        )
+        if pairs is None:
+            scope, params = sql.SQL(""), ()
+        else:
+            scope = sql.SQL(
+                "JOIN unnest(%s::text[], %s::date[]) AS t(ticker, date) "
+                "ON c.ticker = t.ticker AND c.date = t.date "
+            )
+            params = pairs
+        cur.execute(
+            sql.SQL(
+                "INSERT INTO {registry} (ticker, date, loaded_at, row_count, checksum) "
+                "SELECT c.ticker, c.date, now(), count(*), "
+                "md5(string_agg({row}, '|' ORDER BY c.expiry, c.option_type COLLATE \"C\", c.strike)) "
+                "FROM {chain} c {scope}"
+                "GROUP BY c.ticker, c.date "
+                "ON CONFLICT (ticker, date) DO UPDATE SET "
+                "loaded_at = EXCLUDED.loaded_at, row_count = EXCLUDED.row_count, checksum = EXCLUDED.checksum"
+            ).format(registry=self._registry(), row=row, chain=chain, scope=scope),
+            params,
+        )
+
+    # -------------------------------------------------------------- fetch
 
     def tickers(self) -> List[str]:
         configured = os.getenv("OPTIONS_CHAIN_TICKERS", "")

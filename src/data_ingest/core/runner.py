@@ -50,7 +50,7 @@ def run_source(db: Database, source: Source, window: Window) -> int:
         logger.info("[%s] nothing returned", source.name)
         return 0
 
-    db.ensure_table(source.table, source.write_mode)
-    written = db.write(source.table, frame, source.write_mode)
+    db.ensure_table(source.table, source.write_mode, companions=source.ensure_companions)
+    written = db.write(source.table, frame, source.write_mode, after_write=source.after_write)
     logger.info("[%s] %s rows written to %s", source.name, written, source.table.qualified)
     return written
