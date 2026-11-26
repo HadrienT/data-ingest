@@ -49,9 +49,27 @@ past one, so `--full` and `--since` cannot backfill anything — every run just
 fetches today's chain. Running it daily is what builds a history at all; a
 calibration that wants a past day's surface reads that day's stored rows back
 rather than asking yfinance, which no longer has them. Its ticker universe is
-a small fixed list of liquid, options-heavy names (broad ETFs and mega-caps),
-not the full `sp500-prices` universe — see the source file for why — and is
+a small fixed list of liquid, options-heavy names (broad ETFs and mega-caps)
+plus the European index options on the S&P 500, `^SPX` and `^XSP`, not the
+full `sp500-prices` universe — see the source file for why — and is
 overridable with `OPTIONS_CHAIN_TICKERS`.
+
+The table is the **raw** chain. Its `implied_volatility` is Yahoo's, backed
+out at r = q = 0: no consumer should read it as a vol. Each quote also keeps
+its contract:
+
+- `root`, parsed from the contract symbol: the ticker for an equity, and for
+  the index options `SPX` (AM-settled monthlies), `SPXW` (PM-settled) or
+  `XSP`. SPX and SPXW share expiry dates with settlement times a session
+  apart, so the root is part of the primary key, `(date, ticker, expiry,
+  root, option_type, strike)`. Chains stored before the contract was
+  kept (WP 31 L1) carry `root = ticker`, which is what their contracts' roots were.
+- `contract_symbol`, the OCC symbol, and `last_trade_date`, when the contract
+  last traded: a bid/ask that has not moved since an old last trade is a stale
+  quote. Both are NULL on those earlier chains.
+
+The strike coverage yfinance gives on SPX, XSP and SPY is measured in
+[option-coverage.md](option-coverage.md).
 
 Each stored (ticker, date) is **exactly one fetch**: a run's rows for a ticker
 replace everything stored for that ticker on that day, in one transaction, so
@@ -87,19 +105,24 @@ Guarantees to consumers:
   detect a change.
 
 The checksum is reproducible from the table, with `extra_float_digits = 1`
-(the Postgres default) and `DateStyle = 'ISO, MDY'`:
+(the Postgres default), `DateStyle = 'ISO, MDY'` and `TimeZone = 'UTC'`. It
+changed definition when the contract columns were added: the run that added
+them recomputed every registry row, so a checksum compared across that date
+differs without the quotes having changed.
 
 ```sql
+SET TimeZone = 'UTC';
 SELECT md5(string_agg(
-         ROW(expiry, option_type, strike, bid, ask, last_price,
-             volume, open_interest, implied_volatility)::text,
-         '|' ORDER BY expiry, option_type COLLATE "C", strike))
+         ROW(expiry, root, option_type, strike, contract_symbol, last_trade_date,
+             bid, ask, last_price, volume, open_interest, implied_volatility)::text,
+         '|' ORDER BY expiry, root COLLATE "C", option_type COLLATE "C", strike))
 FROM options.chain_snapshot
 WHERE ticker = 'SPY' AND date = '2026-11-18';
 ```
 
-`dividend-yields` tracks the exact same universe (imported from
-`options_chain.py`, not a second list) because it exists to serve the same
+`dividend-yields` tracks the same universe less the index options (imported
+from `options_chain.py`, not a second list; `^SPX` and `^XSP` take their
+forward from their own parity) because it exists to serve the same
 consumer: Dupire needs a dividend yield to build a forward, and
 `sp500-prices` doesn't carry one.
 

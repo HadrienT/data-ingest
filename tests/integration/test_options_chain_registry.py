@@ -53,6 +53,8 @@ def _quotes(ticker="SPY", day=DAY, strikes=(500.0, 510.0), bid=1.0):
         for side in ("call", "put"):
             rows.append({
                 "date": day, "ticker": ticker, "expiry": datetime.date(2027, 1, 15),
+                "root": ticker, "contract_symbol": None,
+                "last_trade_date": datetime.datetime(2026, 11, 18, 20, 59, tzinfo=datetime.timezone.utc),
                 "option_type": side, "strike": strike, "bid": bid, "ask": bid + 0.1,
                 "last_price": bid + 0.05, "volume": 10, "open_interest": 100,
                 "implied_volatility": None,
@@ -158,3 +160,48 @@ def test_creating_the_registry_backfills_every_stored_snapshot(db, source):
 
     _load(db, source, _quotes(day=DAY))  # what a routine run would have recorded
     assert _registry(db)[("SPY", DAY)][2] == backfilled[("SPY", DAY)][2]
+
+
+#: The chain as it was created before the contract was kept.
+_OLD_CHAIN_DDL = """
+CREATE TABLE "{schema}".chain_snapshot (
+    date DATE NOT NULL, ticker TEXT NOT NULL, expiry DATE NOT NULL, option_type TEXT NOT NULL,
+    strike DOUBLE PRECISION NOT NULL, bid DOUBLE PRECISION, ask DOUBLE PRECISION,
+    last_price DOUBLE PRECISION, volume BIGINT, open_interest BIGINT, implied_volatility DOUBLE PRECISION,
+    PRIMARY KEY (date, ticker, expiry, option_type, strike)
+)"""
+
+
+def test_an_old_chain_is_migrated_and_its_registry_recomputed(db, source):
+    with db.connect() as conn:
+        conn.execute(f'CREATE SCHEMA "{SCHEMA}"')
+        conn.execute(_OLD_CHAIN_DDL.format(schema=SCHEMA))
+        conn.execute(
+            f'INSERT INTO "{SCHEMA}".chain_snapshot VALUES '
+            "('2026-11-18', 'SPY', '2027-01-15', 'call', 500, 1, 1.1, 1.05, 10, 100, NULL)"
+        )
+        conn.execute(
+            f'CREATE TABLE "{SCHEMA}"."{REGISTRY_TABLE}" (ticker TEXT NOT NULL, date DATE NOT NULL, '
+            "loaded_at TIMESTAMPTZ NOT NULL, row_count INTEGER NOT NULL, checksum TEXT NOT NULL, "
+            "PRIMARY KEY (ticker, date))"
+        )
+        conn.execute(f"""INSERT INTO "{SCHEMA}"."{REGISTRY_TABLE}" VALUES ('SPY', '2026-11-18', now(), 1, 'old')""")
+
+    db.ensure_table(source.table, source.write_mode, companions=source.ensure_companions)
+
+    with db.connect() as conn:
+        root = conn.execute(f'SELECT root, contract_symbol FROM "{SCHEMA}".chain_snapshot').fetchone()
+        key = conn.execute(
+            "SELECT array_agg(a.attname::text ORDER BY k.ord) FROM pg_constraint c "
+            "CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ord) "
+            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
+            "WHERE c.conrelid = %s::regclass AND c.contype = 'p'",
+            (f"{SCHEMA}.chain_snapshot",),
+        ).fetchone()[0]
+    assert root == ("SPY", None)
+    assert tuple(key) == tuple(source.table.primary_key)
+    assert _registry(db)[("SPY", DAY)][2] != "old"
+
+    # A second run finds nothing to migrate and accepts the new rows.
+    _load(db, source, _quotes())
+    assert _registry(db)[("SPY", DAY)][1] == 4
