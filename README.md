@@ -18,7 +18,7 @@ It feeds [quant-modeling](https://github.com/HadrienT/quant-modeling),
 [quant-backtest](https://github.com/HadrienT/quant-backtest) and
 [quant-microstructure](https://github.com/HadrienT/quant-microstructure). It
 grew out of a single hardcoded S&P 500 pipeline on Google Cloud, which is now
-one source among 23.
+one source among 24.
 
 ## What it collects
 
@@ -26,7 +26,7 @@ one source among 23.
 |---|---|---|
 | US equities | Daily prices, raw prices with dividends and splits kept apart, S&P 500 membership since 1996 | Yahoo Finance |
 | International equities | CAC 40, DAX, FTSE 100 and Nikkei 225: constituents and indices since 2000 | Yahoo Finance |
-| Options | Daily chain snapshots on liquid names, dividend yields | Yahoo Finance |
+| Options | Daily chain snapshots on liquid names and SPX/XSP, dividend yields; implied vols, forwards and discounts computed from them | Yahoo Finance |
 | Rates and macro | Treasury curve, SOFR, VIX, credit spreads by rating; EUR, GBP, CHF and JPY rates and government curves | FRED, ECB, Bank of England, SNB, Bank of Japan, Japan MoF |
 | Traded derivatives | Swaptions, par swap curves, FX options | DTCC public dissemination |
 | FX and commodities | ECB reference rates since 1999, USD pairs, commodity prices | ECB, FRED, Yahoo Finance |
