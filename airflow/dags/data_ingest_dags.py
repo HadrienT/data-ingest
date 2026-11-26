@@ -8,6 +8,13 @@ this process: `data_ingest` is installed into the Airflow image (see
 `Dockerfile.airflow`), so there is no subprocess/CLI boundary between the
 scheduler and the ingestion code.
 
+A source with `inputs` (computed from other sources' tables, such as
+`options-chain-iv`) is not on a cron: every DAG's task publishes an Asset,
+`data-ingest/<source>`, when it succeeds, and the DAG of a source with inputs
+is scheduled on its inputs' Assets, so it runs once all of them have run
+since its last run. A day an input fails, it waits for that input's next
+success, and its own routine window then covers the days in between.
+
 `retries`/`retry_delay`/`execution_timeout` carry over what the old
 `data-ingest@.service` systemd unit did (`StartLimitBurst=3`,
 `RestartSec=120`, `TimeoutStartSec=1800`).
@@ -18,7 +25,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pendulum
-from airflow.sdk import DAG, Param, task
+from airflow.sdk import DAG, Asset, Param, task
 
 from data_ingest.config import dsn
 from data_ingest.core.database import Database
@@ -40,6 +47,18 @@ DEFAULT_ARGS = {
 START_DATE = pendulum.datetime(2025, 1, 1, tz="UTC")
 
 
+def asset(source_name: str) -> Asset:
+    """The Asset a source's DAG publishes when its run succeeds."""
+    return Asset(name=f"data-ingest/{source_name}")
+
+
+def schedule_of(source):
+    """A cron, or the Assets of the source's inputs (all of them)."""
+    if source.inputs:
+        return [asset(get_source(name).name) for name in source.inputs]
+    return source.schedule
+
+
 def _build_dag(source_name: str) -> DAG:
     """One DAG for one source. The source is re-resolved by name inside the
     task body (via `get_source`, the same lookup the CLI uses) rather than
@@ -51,7 +70,7 @@ def _build_dag(source_name: str) -> DAG:
     with DAG(
         dag_id=dag_id,
         description=source.description or f"Ingest {source_name}",
-        schedule=source.schedule,
+        schedule=schedule_of(source),
         start_date=START_DATE,
         catchup=False,
         max_active_runs=1,
@@ -64,7 +83,7 @@ def _build_dag(source_name: str) -> DAG:
         # DAG run's resolved params dict when a parameter is named `params`,
         # so `full` arrives as a native bool from the "Trigger DAG w/ config"
         # form — no Jinja templating of a CLI flag through a shell string.
-        @task(task_id="run")
+        @task(task_id="run", outlets=[asset(source_name)])
         def run(params: dict) -> int:
             db = Database(dsn())
             src = get_source(source_name)

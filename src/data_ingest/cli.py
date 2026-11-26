@@ -22,11 +22,16 @@ from typing import List, Optional
 
 from .config import CAPTURE_DIR, CAPTURE_MAX_GB, LOG_LEVEL, dsn
 from .core.database import Database
-from .core.runner import routine_window, run_source
+from .core.runner import routine_window, run_order, run_source
 from .core.source import Window
 from .registry import all_sources, get_source
 
 logger = logging.getLogger("data_ingest")
+
+
+def schedule_label(source) -> str:
+    """The cron of a source, or what it runs after when it has inputs."""
+    return f"after {','.join(source.inputs)}" if source.inputs else source.schedule
 
 
 def cmd_list(args: argparse.Namespace) -> int:
@@ -40,17 +45,17 @@ def cmd_list(args: argparse.Namespace) -> int:
         # registry without importing it (schedules are also read directly by
         # airflow/dags/data_ingest_dags.py, which runs in the same process).
         for source in sources:
-            print(f"{source.name}\t{source.schedule}")
+            print(f"{source.name}\t{schedule_label(source)}")
         return 0
     width = max(len(s.name) for s in sources)
     for source in sources:
-        print(f"{source.name:<{width}}  {source.table.qualified:<22} {source.write_mode.value:<9} {source.schedule:<16} {source.description}")
+        print(f"{source.name:<{width}}  {source.table.qualified:<22} {source.write_mode.value:<9} {schedule_label(source):<16} {source.description}")
     return 0
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     db = Database(dsn())
-    sources = all_sources() if args.all else [get_source(name) for name in args.source]
+    sources = run_order(all_sources() if args.all else [get_source(name) for name in args.source])
 
     failures: List[str] = []
     for source in sources:
