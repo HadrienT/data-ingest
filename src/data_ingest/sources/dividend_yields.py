@@ -11,7 +11,8 @@ multi-ticker download): fast_info is a per-Ticker object, so this is a
 per-ticker loop, same shape as options_chain.py's.  Same universe as
 options-chain-snapshot by construction (import, not a second list to keep
 in sync) -- this exists to serve the same tickers, and only those, until
-something else needs it too.
+something else needs it too. The index options (^SPX, ^XSP) are left out:
+their forward comes from their own put-call parity, not from a yield.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ import yfinance as yf
 
 from ..core.source import Source, Window
 from ..core.spec import Column, TableSpec, WriteMode
-from .options_chain import DEFAULT_TICKERS
+from .options_chain import DEFAULT_TICKERS, is_index
 
 logger = logging.getLogger("data_ingest.dividend_yields")
 
@@ -54,7 +55,7 @@ class DividendYields(Source):
     )
 
     def tickers(self) -> List[str]:
-        return list(DEFAULT_TICKERS)
+        return [t for t in DEFAULT_TICKERS if not is_index(t)]
 
     def fetch(self, window: Window) -> pd.DataFrame:
         today = datetime.now(timezone.utc).date()

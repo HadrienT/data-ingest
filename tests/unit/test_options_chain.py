@@ -12,6 +12,8 @@ from data_ingest.sources.options_chain import (
 
 def _raw_side(**overrides):
     row = {
+        "contractSymbol": "AAPL260116C00100000",
+        "lastTradeDate": pd.Timestamp("2025-12-01 20:59:58", tz="UTC"),
         "strike": 100.0,
         "bid": 1.2,
         "ask": 1.4,
@@ -40,6 +42,26 @@ def test_normalize_side_maps_yfinance_columns_to_table_columns():
     assert row["volume"] == 42
     assert row["open_interest"] == 500
     assert row["implied_volatility"] == 0.25
+    assert row["root"] == "AAPL"
+    assert row["contract_symbol"] == "AAPL260116C00100000"
+    assert row["last_trade_date"] == pd.Timestamp("2025-12-01 20:59:58", tz="UTC")
+
+
+def test_root_is_parsed_from_the_contract_symbol():
+    """SPX and SPXW share expiry dates, so the root comes from each contract."""
+    for symbol, root in [
+        ("SPX261218C06000000", "SPX"),
+        ("SPXW261202P05700000", "SPXW"),
+        ("XSP261218C00600000", "XSP"),
+        ("AAPL1261218C00100000", "AAPL1"),  # an adjusted contract keeps its digit
+    ]:
+        out = _normalize_side(_raw_side(contractSymbol=symbol), "call", "^SPX", date(2026, 12, 18), date(2026, 11, 26))
+        assert out.iloc[0]["root"] == root
+
+
+def test_root_falls_back_to_the_ticker_without_its_caret():
+    out = _normalize_side(_raw_side(contractSymbol=None), "call", "^XSP", date(2026, 12, 18), date(2026, 11, 26))
+    assert out.iloc[0]["root"] == "XSP"
 
 
 def test_normalize_side_drops_non_positive_strikes():
@@ -63,7 +85,11 @@ def test_normalize_side_skips_a_frame_missing_expected_columns():
 
 
 def test_table_primary_key_matches_what_upsert_needs_to_dedupe_a_rerun():
-    assert OptionsChainSnapshot.table.primary_key == ("date", "ticker", "expiry", "option_type", "strike")
+    assert OptionsChainSnapshot.table.primary_key == ("date", "ticker", "expiry", "root", "option_type", "strike")
+
+
+def test_the_universe_includes_the_european_index_options():
+    assert {"^SPX", "^XSP"} <= set(DEFAULT_TICKERS)
 
 
 def test_tickers_defaults_to_the_fixed_liquid_universe(monkeypatch):

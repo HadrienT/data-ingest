@@ -1,12 +1,22 @@
-"""Daily snapshot of the full option chain, US equities, from yfinance.
+"""Daily snapshot of the full option chain, US equities and S&P 500 index
+options, from yfinance.
 
-Stage 1 only: this captures what yfinance reports for each (ticker, expiry,
-strike, side) quote, unmodified. No re-inversion of a missing or implausible
-implied_volatility, no bid/ask cleaning, no mid/TTM computation -- those are
-derived quantities that belong to the consumer (quant-modeling's RawVolSurface,
-in C++), which also has the spot price and rate a re-inversion needs. Mirrors
-the "no cleaning happens here" split quant-modeling's own fetcher.py already
-draws between fetching and cleaning.
+This table is the raw chain: what yfinance reports for each (ticker, expiry,
+root, strike, side) quote, unmodified. Its `implied_volatility` is Yahoo's,
+backed out at r = q = 0, and no consumer should read it as a vol. The implied
+vols, forwards and discounts are computed at ingestion from these rows by
+`options-chain-iv` (options_chain_iv.py) into `options.chain_iv`: the raw
+chain stays untouched, so a method change is a recomputation, never a loss.
+(This reverses an earlier choice that left the inversion to quant-modeling,
+which let Yahoo's r = q = 0 vols reach its surfaces: quant-modeling WP 31.)
+
+`root` is the contract's option root, parsed from yfinance's contractSymbol:
+the ticker for an equity (SPY, AAPL), and for the index options `SPX`
+(AM-settled monthlies), `SPXW` (PM-settled) or `XSP`. SPX and SPXW can share
+an expiry date with settlement times a session apart, so the root is part of
+the key. Chains stored before the root was kept carry root = ticker, which is
+what their contracts' roots were. `last_trade_date` is when the contract last
+traded, the only way to see a quote whose bid/ask has not refreshed.
 
 Unlike sp500-prices, yfinance exposes no *history* of past option chains --
 only the chain live at fetch time. So `window.full` and `--since` cannot
@@ -44,6 +54,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import date, datetime
 from typing import List, Optional
@@ -69,10 +80,22 @@ RETRY_BACKOFF_SECONDS = 1.5
 DEFAULT_TICKERS = [
     "SPY", "QQQ", "IWM",
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA",
+    # European options on the S&P 500: SPX (and its PM-settled SPXW) and the
+    # mini-SPX XSP, a tenth of SPX. Their parity gives a model-free forward
+    # and discount, which the American chains borrow (options_chain_iv.py).
+    "^SPX", "^XSP",
 ]
+
+
+def is_index(ticker: str) -> bool:
+    """Yahoo's index symbols start with a caret (^SPX, ^XSP)."""
+    return ticker.startswith("^")
+
 
 #: yfinance's option_chain() column names -> the table's columns.
 _RAW_TO_STORED = {
+    "contractSymbol": "contract_symbol",
+    "lastTradeDate": "last_trade_date",
     "strike": "strike",
     "bid": "bid",
     "ask": "ask",
@@ -82,6 +105,19 @@ _RAW_TO_STORED = {
     "impliedVolatility": "implied_volatility",
 }
 
+#: An OCC option symbol: root, then yymmdd, C or P, and the strike times 1000
+#: on eight digits. The root is lazy so a root ending in a digit (an adjusted
+#: contract such as AAPL1) keeps it.
+_CONTRACT_SYMBOL = re.compile(r"^(?P<root>.+?)\d{6}[CP]\d{8}$")
+
+#: The columns the chain gained when it started keeping the contract, added
+#: to a table created before then (see `_migrate`).
+_ADDED_COLUMNS = (
+    ("root", "TEXT"),
+    ("contract_symbol", "TEXT"),
+    ("last_trade_date", "TIMESTAMPTZ"),
+)
+
 #: Name of the load registry, in the chain's schema.
 REGISTRY_TABLE = "chain_snapshot_loads"
 
@@ -90,14 +126,14 @@ REGISTRY_TABLE = "chain_snapshot_loads"
 #: primary-key order. Part of the contract in docs/sources.md: changing it
 #: changes every checksum.
 _CHECKSUM_COLUMNS = (
-    "expiry", "option_type", "strike", "bid", "ask", "last_price",
-    "volume", "open_interest", "implied_volatility",
+    "expiry", "root", "option_type", "strike", "contract_symbol", "last_trade_date",
+    "bid", "ask", "last_price", "volume", "open_interest", "implied_volatility",
 )
 
 
 class OptionsChainSnapshot(Source):
     name = "options-chain-snapshot"
-    description = "Daily snapshot of the full option chain, US equities (yfinance)"
+    description = "Daily snapshot of the full option chain, US equities and SPX/XSP (yfinance)"
     write_mode = WriteMode.SNAPSHOT
     # After the US close (16:00 New York), same reasoning as sp500-prices'
     # 22:00 Paris slot: close enough behind the close without chasing DST.
@@ -118,9 +154,13 @@ class OptionsChainSnapshot(Source):
             Column("last_price", "DOUBLE PRECISION"),
             Column("volume", "BIGINT"),
             Column("open_interest", "BIGINT"),
-            Column("implied_volatility", "DOUBLE PRECISION"),
+            Column("implied_volatility", "DOUBLE PRECISION"),  # Yahoo's, at r = q = 0: not a vol to use
+            # Declared last, where a migrated table has them (see _migrate).
+            Column("root", "TEXT", nullable=False),  # SPY, AAPL, SPX, SPXW, XSP...
+            Column("contract_symbol", "TEXT"),
+            Column("last_trade_date", "TIMESTAMPTZ"),
         ),
-        primary_key=("date", "ticker", "expiry", "option_type", "strike"),
+        primary_key=("date", "ticker", "expiry", "root", "option_type", "strike"),
         # The common downstream query is "one ticker's whole surface on one
         # day"; the primary key already serves "everything on one day".
         indexes=(("ticker", "date"),),
@@ -133,9 +173,12 @@ class OptionsChainSnapshot(Source):
         return sql.SQL("{}.{}").format(sql.Identifier(self.table.schema), sql.Identifier(REGISTRY_TABLE))
 
     def ensure_companions(self, conn: psycopg.Connection) -> None:
-        """Creates the load registry and, when it is new, fills it for every
-        snapshot already stored, so it holds one row per stored (ticker, date)
-        from the moment it exists."""
+        """Brings a chain created before the contract was kept to the current
+        columns, then creates the load registry. A new registry, or one whose
+        checksums the migration changed, is filled for every snapshot stored,
+        so it holds one row per stored (ticker, date) from the moment it
+        exists."""
+        migrated = self._migrate(conn)
         qualified = f"{self.table.schema}.{REGISTRY_TABLE}"
         existed = conn.execute("SELECT to_regclass(%s)", (qualified,)).fetchone()[0] is not None
         conn.execute(
@@ -150,10 +193,43 @@ class OptionsChainSnapshot(Source):
                 ")"
             ).format(self._registry())
         )
-        if not existed:
+        if not existed or migrated:
             with conn.cursor() as cur:
                 self._record_loads(cur, None)
-                logger.info("%s created and backfilled: %s snapshots", qualified, cur.rowcount)
+                logger.info("%s %s: %s snapshots", qualified, "recomputed" if existed else "created and backfilled",
+                            cur.rowcount)
+
+    def _migrate(self, conn: psycopg.Connection) -> bool:
+        """Adds `root`, `contract_symbol` and `last_trade_date` to a chain that
+        lacks them, and puts `root` in its primary key. Every chain stored
+        before then was an equity's, whose contracts' root is the ticker; the
+        contract symbol and last trade date were not kept and stay NULL.
+        Returns whether the table changed, which changes every checksum."""
+        stored = {
+            r[0] for r in conn.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = %s AND table_name = %s",
+                (self.table.schema, self.table.name),
+            )
+        }
+        if "root" in stored:
+            return False
+        chain = sql.SQL("{}.{}").format(sql.Identifier(self.table.schema), sql.Identifier(self.table.name))
+        for name, kind in _ADDED_COLUMNS:
+            conn.execute(sql.SQL("ALTER TABLE {} ADD COLUMN IF NOT EXISTS {} " + kind).format(chain, sql.Identifier(name)))
+        conn.execute(sql.SQL("UPDATE {} SET root = ticker").format(chain))
+        conn.execute(sql.SQL("ALTER TABLE {} ALTER COLUMN root SET NOT NULL").format(chain))
+        pk_name = conn.execute(
+            "SELECT conname FROM pg_constraint WHERE conrelid = %s::regclass AND contype = 'p'",
+            (f"{self.table.schema}.{self.table.name}",),
+        ).fetchone()[0]
+        conn.execute(sql.SQL("ALTER TABLE {} DROP CONSTRAINT {}").format(chain, sql.Identifier(pk_name)))
+        conn.execute(
+            sql.SQL("ALTER TABLE {} ADD PRIMARY KEY ({})").format(
+                chain, sql.SQL(", ").join(sql.Identifier(c) for c in self.table.primary_key)
+            )
+        )
+        logger.info("%s migrated: root, contract_symbol and last_trade_date added", self.table.qualified)
+        return True
 
     def after_write(self, cur: psycopg.Cursor, frame: pd.DataFrame) -> None:
         pairs = frame[["ticker", "date"]].drop_duplicates()
@@ -162,10 +238,12 @@ class OptionsChainSnapshot(Source):
     def _record_loads(self, cur: psycopg.Cursor, pairs: Optional[tuple]) -> None:
         """Upserts the registry rows of `pairs` (tickers, dates), or of every
         stored snapshot when None, from the rows the chain holds now."""
-        # The checksum hashes the text of the rows, so pin the two settings
-        # that change it: the float output precision and the date format.
+        # The checksum hashes the text of the rows, so pin the settings that
+        # change it: the float output precision, the date format and the time
+        # zone a timestamptz is printed in.
         cur.execute("SET LOCAL extra_float_digits = 1")
         cur.execute("SET LOCAL DateStyle = 'ISO, MDY'")
+        cur.execute("SET LOCAL TimeZone = 'UTC'")
 
         chain = sql.SQL("{}.{}").format(sql.Identifier(self.table.schema), sql.Identifier(self.table.name))
         row = sql.SQL("ROW({})::text").format(
@@ -183,7 +261,7 @@ class OptionsChainSnapshot(Source):
             sql.SQL(
                 "INSERT INTO {registry} (ticker, date, loaded_at, row_count, checksum) "
                 "SELECT c.ticker, c.date, now(), count(*), "
-                "md5(string_agg({row}, '|' ORDER BY c.expiry, c.option_type COLLATE \"C\", c.strike)) "
+                "md5(string_agg({row}, '|' ORDER BY c.expiry, c.root COLLATE \"C\", c.option_type COLLATE \"C\", c.strike)) "
                 "FROM {chain} c {scope}"
                 "GROUP BY c.ticker, c.date "
                 "ON CONFLICT (ticker, date) DO UPDATE SET "
@@ -287,6 +365,9 @@ def _normalize_side(
     out["expiry"] = expiry
     out["option_type"] = option_type
 
+    out["root"] = out["contract_symbol"].map(lambda sym: _root(sym, ticker))
+    out["last_trade_date"] = pd.to_datetime(out["last_trade_date"], errors="coerce", utc=True)
+
     out = out[pd.to_numeric(out["strike"], errors="coerce") > 0]
     for col in ("strike", "bid", "ask", "last_price", "implied_volatility"):
         out[col] = pd.to_numeric(out[col], errors="coerce")
@@ -297,6 +378,13 @@ def _normalize_side(
     # re-deriving it from price is a cleaning-stage concern, not this one's.
     out.loc[out["implied_volatility"] <= 0, "implied_volatility"] = np.nan
 
-    return out[
-        ["date", "ticker", "expiry", "option_type", "strike", "bid", "ask", "last_price", "volume", "open_interest", "implied_volatility"]
-    ]
+    return out[OptionsChainSnapshot.table.column_names]
+
+
+def _root(contract_symbol: object, ticker: str) -> str:
+    """The option root of an OCC contract symbol, or the ticker without its
+    index caret when the symbol is missing or does not parse."""
+    match = _CONTRACT_SYMBOL.match(contract_symbol) if isinstance(contract_symbol, str) else None
+    if match:
+        return match.group("root")
+    return ticker.lstrip("^")
