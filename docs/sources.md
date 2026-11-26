@@ -10,6 +10,7 @@ consumer needs to know about each one.
 | `fred-macro` | `macro.fred_series` | versioned | `0 23 * * 1-5` |
 | `fx-rates` | `fx.daily_rates` | upsert | `0 23 * * 1-5` |
 | `options-chain-snapshot` | `options.chain_snapshot` | snapshot | `30 22 * * 1-5` |
+| `options-chain-iv` | `options.chain_iv` | snapshot | after its inputs (see below) |
 | `dividend-yields` | `prices.dividend_yields` | upsert | `0 22 * * 1-5` |
 | `intl-rates` | `macro.intl_rates` | upsert | `30 21 * * 1-5` |
 | `equity-universe` | `prices.equity_universe` | upsert | `0 6 * * 1` |
@@ -119,6 +120,149 @@ SELECT md5(string_agg(
 FROM options.chain_snapshot
 WHERE ticker = 'SPY' AND date = '2026-11-18';
 ```
+
+### `options-chain-iv`
+
+The implied vols, forwards and discounts of the stored chains, computed at
+ingestion from `options.chain_snapshot` (quant-modeling WP 31). The raw chain
+stays as yfinance returned it; a method change is a recomputation.
+
+**When it runs.** It reads stored tables and fetches nothing. Its Airflow
+DAG has no cron. It runs once the four DAGs it reads from have succeeded
+since its last run:
+- `options-chain-snapshot`;
+- `sp500-prices` (the American spots);
+- `dividend-yields`;
+- `equity-dividends`.
+
+FRED is read as of the day's latest stored value and recorded, without
+being waited for: SOFR for a day is published the next morning.
+
+**Which days it computes.**
+- A routine run looks back five days, catching up from the last computed
+  day after a gap. It recomputes the days whose snapshot changed since they
+  were computed (`chain_snapshot_loads.loaded_at`) or that were computed by
+  another `METHOD_VERSION`.
+- `ingest run options-chain-iv --full` recomputes every stored day, whatever
+  its state. It is the deliberate command after a method change. Run it from
+  the CLI, not from the DAG's `full` switch, which would exceed the task's
+  30 minutes.
+
+**How each day is computed.**
+1. **Free parity fit per European (root, expiry):**
+   - the chains are `^SPX` (roots `SPX`, AM-settled, and `SPXW`) and `^XSP`;
+   - the fit is a robust regression of `C − P = DF F − DF K` over the
+     strikes within 10 % of the money that are two-sided on both sides,
+     weighted by 1 / (spread_C² + spread_P²), with Huber's loss.
+2. **The day's discount curve**, from the free fits whose slope is reliable:
+   at least 14 days, a rate standard error under 25 bp, a dispersion under
+   half the parity band, and within 50 bp of their neighbours. The zero
+   rate is interpolated linearly in T. With fewer than three such nodes,
+   the curve falls back to FRED (SOFR, then the Treasury CMT yields `DGS1MO`
+   to `DGS30`), and every quote of the day is flagged `rate_fallback`. Every
+   day stored before SPX was captured is in that case.
+3. **European expiries refitted at the curve's DF**, F alone from their own
+   parity. On a short expiry the free slope's error on DF is tens of points
+   of rate; the free DF stays in `free_discount`.
+4. **American expiries:**
+   - DF from the same curve (WP 31, D3);
+   - F from carry, `(S − PV(D)) e^{(r − q)T}`, with S the stored close of
+     the session;
+   - the dividends are discrete, projected from `prices.dividends` (the last
+     amount at the median gap of the last five ex-dates), **for every ticker
+     with a history, the index ETFs included**. The trailing yield of
+     `prices.dividend_yields` is only the fallback.
+5. **Per quote:**
+   - the OTM side of every strike, and both sides within |ln K/F| < 0.02,
+     the ITM one flagged `not_otm`;
+   - the bid/ask mid as the price;
+   - an American mid is de-Americanized on a 201-step Leisen-Reimer tree.
+     `early_exercise_premium` is American − European on the same tree, at
+     the σ where Black on `mid − premium` gives σ back (a fixed point);
+   - Black-76 is inverted by Jäckel's Let's Be Rational.
+
+**Why the ETFs take discrete dividends.** WP 31 §4.3 gave them a continuous
+yield. On SPY 2026-11-25/26, two inputs went wrong with it:
+- yfinance's trailing yield (0.79 %) is below what the stored payments give
+  (7.58 $ over twelve months, 1.06 %);
+- a continuous yield spreads the December ex-date (1.9 $) over the year.
+
+With the SPX curve, the median call/put IV gap within |ln K/F| < 0.02 went
+from 0.82 to 0.27 vol points, and under 0.1 point on every expiry to
+February 2027.
+
+**Times.** `ttm` is in years, ACT/365F:
+- from the close of the last NYSE session on or before `date` (13:00 New
+  York on an early-close day);
+- to the settlement: 09:30 New York on the expiry date for the `SPX` root,
+  16:00 for every other.
+
+SPX and XSP options also trade overnight (Cboe GTH, from 20:15 New York).
+The 22:30 UTC snapshot falls before it. A snapshot taken during that session
+would not be synchronous with the stored closes.
+
+**Rejections and flags.** Quotes are never dropped silently. An expiry
+is rejected (`status`, `rejection_reason` in `chain_iv_expiries`; its quotes
+flagged `expiry_rejected`) when:
+
+| Exercise | Reason |
+|---|---|
+| any | `too_few_pairs`: under 5 two-sided pairs (European) or 3 near the money (American) |
+| European | `parity_dispersion`: residual dispersion above the median half-band |
+| European | `parity_bounds`: over half the pairs outside the bid/ask parity bounds |
+| European | `unknown_root`: a root whose settlement is not known (`SPXO`, seen on yfinance); no quote rows |
+| American | `parity_dispersion`: the de-Americanized parity forwards near the money spread wider than their half-band |
+| American | `no_spot`: no close for the session; no quote rows |
+
+`flags` is a bit set:
+
+| Bit | Flag | Meaning |
+|---|---|---|
+| 1 | `no_bid` | bid missing or zero |
+| 2 | `wide_spread` | (ask − bid) / mid above 50 % |
+| 4 | `below_two_ticks` | mid under two ticks (SPX: 0.05/0.10; XSP, SPY, QQQ, IWM: 0.01; other equities: 0.01/0.05) |
+| 8 | `stale` | same bid and ask as the previous snapshot, no trade since its session closed |
+| 16 | `parity_outlier` | its strike's pair breaks parity: the bid/ask bounds (American: `S e^{−qT} − PV(D) − K ≤ C − P ≤ S − K DF`) or a residual beyond 4 robust σ |
+| 32 | `expiry_rejected` | see above |
+| 64 | `iv_failed` | no implied vol: no mid, or a price outside Black's range |
+| 128 | `not_otm` | the ITM side, kept near the forward for the call/put diagnostic only |
+| 256 | `short_maturity` | under 7 days |
+| 512 | `rate_fallback` | DF from FRED, not from the day's European parity |
+
+A bit never changes meaning; new ones are added. The thresholds are starting
+values, to be fixed by WP 31's literature review (lot L0).
+
+**Tables.**
+- `options.chain_iv`: one row per kept quote and day, keyed like the chain:
+  `(date, ticker, expiry, root, option_type, strike)`. The columns are those
+  of WP 31 §4.2.
+- `options.chain_iv_expiries`: one row per (date, ticker, expiry, root), with
+  the following columns:
+  - F and DF, and their sources;
+  - `implied_rate` (−ln DF / T) and `implied_yield` (r − ln(F/S) / T, S the
+    stored close, so contaminated by any asynchrony);
+  - the free parity DF and its standard error (European);
+  - the parity forward near the money and its gap from the carry forward
+    (American);
+  - the dispersion and half-band;
+  - the pair and bound-violation counts;
+  - the status and reason.
+- `options.chain_iv_loads`: the load registry, one row per (ticker, date),
+  written in the same transaction as the quotes. It holds:
+  - `row_count` and `checksum`, the md5 of the rows as text, ordered like
+    the chain's, with the settings of `chain_snapshot_loads`;
+  - `method_version`;
+  - `valuation_time`;
+  - the curve's source and date;
+  - the spot and dividend dates.
+- A ticker whose recomputation keeps no quote loses its earlier rows, so the
+  three tables always describe one computation.
+
+**Measured on 2026-11-25/26:**
+- SPX's one-year ATM vol is 19.6 %; SPY's, de-Americanized, 20.0–20.2 %.
+- The SPX implied rate runs from 4.4 % to 5.1 %.
+- A full day of the ten American tickers takes about a minute; the three
+  of 2026-11-26 (SPX, XSP, SPY), 20 s.
 
 `dividend-yields` tracks the same universe less the index options (imported
 from `options_chain.py`, not a second list; `^SPX` and `^XSP` take their

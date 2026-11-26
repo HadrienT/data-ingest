@@ -7,6 +7,9 @@ Airflow DAGs in `airflow/dags/data_ingest_dags.py` call this directly, so
 there is one place that knows what "running a source" means rather than
 Airflow shelling out to the CLI as a black box.
 
+A source with `inputs` (computed from other sources' tables) receives the
+database through `Source.frames`; `run_order` puts it after its inputs.
+
 Exceptions are not caught here — that is a decision each caller makes for
 itself. `cmd_run` wraps this per source so `--all` keeps going after one
 failure; an Airflow task lets the exception propagate so the task fails and
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
+from typing import List, Sequence
 
 from .database import Database
 from .source import Source, Window
@@ -44,13 +48,41 @@ def routine_window(db: Database, source: Source) -> Window:
 
 
 def run_source(db: Database, source: Source, window: Window) -> int:
+    """Fetches the window and writes it, one transaction per frame the
+    source yields (see `Source.frames`). Returns the rows written."""
     logger.info("[%s] fetching %s", source.name, window)
-    frame = source.fetch(window)
-    if frame.empty:
+    written, ready = 0, False
+    for frame in source.frames(db, window):
+        if frame.empty:
+            continue
+        if not ready:
+            db.ensure_table(source.table, source.write_mode, companions=source.ensure_companions)
+            ready = True
+        written += db.write(source.table, frame, source.write_mode, after_write=source.after_write)
+    if not ready:
         logger.info("[%s] nothing returned", source.name)
         return 0
-
-    db.ensure_table(source.table, source.write_mode, companions=source.ensure_companions)
-    written = db.write(source.table, frame, source.write_mode, after_write=source.after_write)
     logger.info("[%s] %s rows written to %s", source.name, written, source.table.qualified)
     return written
+
+
+def run_order(sources: Sequence[Source]) -> List[Source]:
+    """The sources in an order that runs each after its `inputs`."""
+    by_name = {s.name: s for s in sources}
+    ordered: List[Source] = []
+    seen: set = set()
+
+    def visit(source: Source, path: tuple) -> None:
+        if source.name in seen:
+            return
+        if source.name in path:
+            raise ValueError(f"Sources depend on each other in a cycle: {' -> '.join((*path, source.name))}")
+        for name in source.inputs:
+            if name in by_name:
+                visit(by_name[name], (*path, source.name))
+        seen.add(source.name)
+        ordered.append(source)
+
+    for source in sources:
+        visit(source, ())
+    return ordered

@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Iterator, Optional, Sequence
 
 import pandas as pd
 
@@ -13,6 +13,8 @@ from .spec import TableSpec, WriteMode
 
 if TYPE_CHECKING:
     import psycopg
+
+    from .database import Database
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,12 @@ class Source(ABC):
     #: `fetch` honours `window.start`; None keeps the plain lookback.
     catch_up_on: Optional[str] = None
 
+    #: For a source computed from what other sources stored rather than
+    #: fetched from upstream: their names. Its Airflow DAG then runs once
+    #: every one of them has run, instead of on `schedule`, and `ingest run
+    #: --all` runs it after them.
+    inputs: Sequence[str] = ()
+
     @abstractmethod
     def fetch(self, window: Window) -> pd.DataFrame:
         """Return rows for the window, with columns matching the table spec.
@@ -84,6 +92,16 @@ class Source(ABC):
         Returning an empty DataFrame is a normal outcome (a holiday, nothing
         published yet) and must not raise.
         """
+
+    def frames(self, db: "Database", window: Window) -> Iterator[pd.DataFrame]:
+        """The frames a run writes, each in a transaction of its own.
+
+        By default the one frame `fetch` returns. A source that reads the
+        database (one with `inputs`), or whose history is too large for one
+        frame, overrides this and yields its rows in parts, a day at a time
+        for instance: a part is written before the next is computed.
+        """
+        yield self.fetch(window)
 
     def ensure_companions(self, conn: "psycopg.Connection") -> None:
         """Create the tables this source maintains next to its own.
